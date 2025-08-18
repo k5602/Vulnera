@@ -1,0 +1,47 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+docs/research/
+!docs/api-examples.md
+!docs/api-versioning.md
+
+# CI/CD
+.github/
+.pre-commit-config.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Rust
+target/
+**/*.rs.bk
+
+# Logs
+*.log
+
+# Cache
+.vulnera_cache/
+reports/
+
+# Environment
+.env
+.env.*
+
+# Coverage
+coverage/
+tarpaulin-report.html
+
+# Development tools
+Makefile
+clippy.toml
+rustfmt.toml

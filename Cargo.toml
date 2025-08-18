@@ -1,0 +1,66 @@
+[package]
+name = "vulnera-rust"
+version = "0.1.0"
+edition = "2024"
+authors = ["ID-Brains"]
+description = "A comprehensive vulnerability analysis API for multiple programming language ecosystems"
+license = "MIT"
+repository = "https://github.com/k5602/vulnera"
+keywords = ["security", "vulnerability", "analysis", "dependencies"]
+categories = ["web-programming", "development-tools"]
+
+[dependencies]
+# Web framework
+axum = { version = "0.8.4", features = ["macros"] }
+tower = "0.5.2"
+tower-http = { version = "0.6.6", features = ["cors", "trace", "timeout"] }
+
+# Async runtime
+tokio = { version = "1.47.1", features = ["full"] }
+futures = "0.3.31"
+async-trait = "0.1.89"
+
+# HTTP client
+reqwest = { version = "0.12.23", features = ["json", "stream"] }
+
+# Serialization
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.142"
+
+# OpenAPI documentation
+utoipa = { version = "5.4.0", features = ["axum_extras", "uuid", "chrono"] }
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
+
+# Error handling
+anyhow = "1.0.99"
+thiserror = "2.0.15"
+
+# Configuration
+config = "0.15.14"
+
+# Logging and tracing
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
+
+# Time handling
+chrono = { version = "0.4.40", features = ["serde"] }
+
+# UUID generation
+uuid = { version = "1.18.0", features = ["v4", "serde"] }
+
+# Hashing for cache keys
+sha2 = "0.10.8"
+hex = "0.4.3"
+# File parsing
+toml = "0.9.5"
+serde_yaml = "0.9.34"
+regex = "1.11.1"
+
+[dev-dependencies]
+tokio-test = "0.4.4"
+mockito = "1.7.0"
+tempfile = "3.20"
+axum-test = "17.3.0"
+
+[build-dependencies]
+vergen = { version = "8.0", features = ["build", "git", "gitcl"] }

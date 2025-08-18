@@ -1,0 +1,26 @@
+# Default configuration for Vulnera Rust
+
+[server]
+host = "0.0.0.0"
+port = 3000
+
+[cache]
+directory = ".vulnera_cache"
+ttl_hours = 24
+
+[apis.osv]
+base_url = "https://api.osv.dev/v1"
+timeout_seconds = 30
+
+[apis.nvd]
+base_url = "https://services.nvd.nist.gov/rest/json"
+timeout_seconds = 30
+rate_limit_per_30s = 5  # Without API key, 50 with API key
+
+[apis.ghsa]
+graphql_url = "https://api.github.com/graphql"
+timeout_seconds = 30
+
+[logging]
+level = "info"
+format = "json"
