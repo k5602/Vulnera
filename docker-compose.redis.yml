@@ -1,0 +1,325 @@
+# Docker Compose configuration for Redis caching
+# This file provides various Redis deployment scenarios for Vulnera
+
+version: '3.8'
+
+services:
+  # =============================================================================
+  # BASIC REDIS SETUP
+  # =============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: vulnera-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - vulnera-network
+
+  # =============================================================================
+  # REDIS WITH PERSISTENCE
+  # =============================================================================
+  redis-persistent:
+    image: redis:7-alpine
+    container_name: vulnera-redis-persistent
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_persistent_data:/data
+      - ./redis-persistent.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    restart: unless-stopped
+    environment:
+      - REDIS_REPLICATION_MODE=master
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - vulnera-network
+
+  # =============================================================================
+  # REDIS CLUSTER (3 nodes)
+  # =============================================================================
+  redis-cluster-1:
+    image: redis:7-alpine
+    container_name: vulnera-redis-cluster-1
+    ports:
+      - "7001:6379"
+      - "17001:16379"
+    volumes:
+      - redis_cluster_1_data:/data
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    networks:
+      - vulnera-network
+
+  redis-cluster-2:
+    image: redis:7-alpine
+    container_name: vulnera-redis-cluster-2
+    ports:
+      - "7002:6379"
+      - "17002:16379"
+    volumes:
+      - redis_cluster_2_data:/data
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    networks:
+      - vulnera-network
+
+  redis-cluster-3:
+    image: redis:7-alpine
+    container_name: vulnera-redis-cluster-3
+    ports:
+      - "7003:6379"
+      - "17003:16379"
+    volumes:
+      - redis_cluster_3_data:/data
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    networks:
+      - vulnera-network
+
+  # =============================================================================
+  # REDIS SENTINEL SETUP
+  # =============================================================================
+  redis-master:
+    image: redis:7-alpine
+    container_name: vulnera-redis-master
+    ports:
+      - "6381:6379"
+    volumes:
+      - redis_master_data:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    networks:
+      - vulnera-network
+
+  redis-slave:
+    image: redis:7-alpine
+    container_name: vulnera-redis-slave
+    ports:
+      - "6382:6379"
+    volumes:
+      - redis_slave_data:/data
+    command: >
+      redis-server
+      --slaveof redis-master 6379
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    depends_on:
+      - redis-master
+    networks:
+      - vulnera-network
+
+  redis-sentinel-1:
+    image: redis:7-alpine
+    container_name: vulnera-redis-sentinel-1
+    ports:
+      - "26379:26379"
+    volumes:
+      - ./sentinel.conf:/usr/local/etc/redis/sentinel.conf
+    command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+    depends_on:
+      - redis-master
+      - redis-slave
+    networks:
+      - vulnera-network
+
+  redis-sentinel-2:
+    image: redis:7-alpine
+    container_name: vulnera-redis-sentinel-2
+    ports:
+      - "26380:26379"
+    volumes:
+      - ./sentinel.conf:/usr/local/etc/redis/sentinel.conf
+    command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+    depends_on:
+      - redis-master
+      - redis-slave
+    networks:
+      - vulnera-network
+
+  redis-sentinel-3:
+    image: redis:7-alpine
+    container_name: vulnera-redis-sentinel-3
+    ports:
+      - "26381:26379"
+    volumes:
+      - ./sentinel.conf:/usr/local/etc/redis/sentinel.conf
+    command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+    depends_on:
+      - redis-master
+      - redis-slave
+    networks:
+      - vulnera-network
+
+  # =============================================================================
+  # REDIS WITH MONITORING
+  # =============================================================================
+  redis-monitored:
+    image: redis:7-alpine
+    container_name: vulnera-redis-monitored
+    ports:
+      - "6383:6379"
+    volumes:
+      - redis_monitored_data:/data
+      - ./redis-monitored.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    restart: unless-stopped
+    networks:
+      - vulnera-network
+
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: vulnera-redis-exporter
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis://redis-monitored:6379
+    depends_on:
+      - redis-monitored
+    networks:
+      - vulnera-network
+
+  # =============================================================================
+  # VULNERA APPLICATION
+  # =============================================================================
+  vulnera:
+    build: .
+    container_name: vulnera-app
+    ports:
+      - "3000:3000"
+    environment:
+      - VULNERA__CACHE__STRATEGY=RedisWithFileFallback
+      - VULNERA__CACHE__REDIS__URL=redis://redis:6379
+      - VULNERA__CACHE__REDIS__POOL_SIZE=10
+      - VULNERA__CACHE__REDIS__KEY_PREFIX="vulnera:docker:"
+    depends_on:
+      - redis
+    volumes:
+      - ./config:/app/config
+      - vulnera_cache:/app/.vulnera_cache
+    networks:
+      - vulnera-network
+
+  # =============================================================================
+  # REDIS COMMANDER (Web UI)
+  # =============================================================================
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: vulnera-redis-commander
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    depends_on:
+      - redis
+    networks:
+      - vulnera-network
+
+volumes:
+  redis_data:
+    driver: local
+  redis_persistent_data:
+    driver: local
+  redis_cluster_1_data:
+    driver: local
+  redis_cluster_2_data:
+    driver: local
+  redis_cluster_3_data:
+    driver: local
+  redis_master_data:
+    driver: local
+  redis_slave_data:
+    driver: local
+  redis_monitored_data:
+    driver: local
+  vulnera_cache:
+    driver: local
+
+networks:
+  vulnera-network:
+    driver: bridge
+
+# =============================================================================
+# USAGE EXAMPLES
+# =============================================================================
+
+# Start basic Redis setup:
+# docker-compose -f docker-compose.redis.yml up redis vulnera
+
+# Start Redis cluster:
+# docker-compose -f docker-compose.redis.yml up redis-cluster-1 redis-cluster-2 redis-cluster-3
+# Then initialize cluster:
+# docker exec -it vulnera-redis-cluster-1 redis-cli --cluster create \
+#   redis-cluster-1:6379 redis-cluster-2:6379 redis-cluster-3:6379 \
+#   --cluster-replicas 0 --cluster-yes
+
+# Start Redis Sentinel setup:
+# docker-compose -f docker-compose.redis.yml up redis-master redis-slave redis-sentinel-1 redis-sentinel-2 redis-sentinel-3
+
+# Start with monitoring:
+# docker-compose -f docker-compose.redis.yml up redis-monitored redis-exporter
+
+# Start everything:
+# docker-compose -f docker-compose.redis.yml up
+
+# View Redis logs:
+# docker-compose -f docker-compose.redis.yml logs -f redis
+
+# Connect to Redis CLI:
+# docker exec -it vulnera-redis redis-cli
+
+# Monitor Redis:
+# docker exec -it vulnera-redis redis-cli monitor
+
+# Check Redis info:
+# docker exec -it vulnera-redis redis-cli info
+
+# Backup Redis data:
+# docker exec vulnera-redis redis-cli BGSAVE
+
+# Stop and remove everything:
+# docker-compose -f docker-compose.redis.yml down -v

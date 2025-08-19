@@ -1,13 +1,13 @@
 //! Vulnera Rust - Main application entry point
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{net::SocketAddr, sync::Arc};
 use tokio::{net::TcpListener, signal};
 
 use vulnera_rust::{
     Config,
-    application::{AnalysisServiceImpl, CacheServiceImpl, ReportServiceImpl},
+    application::{AnalysisServiceImpl, ReportServiceImpl},
     infrastructure::{
-        cache::file_cache::FileCacheRepository, parsers::ParserFactory,
+        cache::cache_factory::CacheFactory, parsers::ParserFactory,
         repositories::AggregatingVulnerabilityRepository,
     },
     init_tracing,
@@ -33,11 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Initialize infrastructure services
-    let cache_repository = Arc::new(FileCacheRepository::new(
-        config.cache.directory.clone(),
-        Duration::from_secs(config.cache.ttl_hours * 3600),
-    ));
-    let cache_service = Arc::new(CacheServiceImpl::new(cache_repository));
+    let cache_service = Arc::new(CacheFactory::create_with_fallback(&config.cache).await);
     let parser_factory = Arc::new(ParserFactory::new());
     let vulnerability_repository = Arc::new(AggregatingVulnerabilityRepository::new());
     let analysis_service = Arc::new(AnalysisServiceImpl::new(

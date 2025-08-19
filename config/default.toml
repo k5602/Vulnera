@@ -7,6 +7,18 @@ port = 3000
 [cache]
 directory = ".vulnera_cache"
 ttl_hours = 24
+strategy = "FileOnly"
+
+# Redis configuration (optional)
+# [cache.redis]
+# url = "redis://localhost:6379"
+# pool_size = 10
+# connection_timeout_seconds = 5
+# command_timeout_seconds = 3
+# retry_attempts = 3
+# key_prefix = "vulnera:"
+# enable_compression = true
+# max_key_length = 250
 
 [apis.osv]
 base_url = "https://api.osv.dev/v1"

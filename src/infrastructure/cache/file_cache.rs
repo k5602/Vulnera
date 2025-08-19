@@ -540,6 +540,45 @@ impl FileCacheRepository {
 
         Ok(true)
     }
+
+    /// Clear all cache entries
+    pub async fn clear_all(&self) -> Result<(), ApplicationError> {
+        let mut stats = self.stats.lock().await;
+
+        // Remove all files in the cache directory
+        let mut entries = fs::read_dir(&self.cache_dir).await.map_err(ApplicationError::Io)?;
+
+        while let Some(entry) = entries.next_entry().await.map_err(ApplicationError::Io)? {
+            if entry.file_type().await.map_err(ApplicationError::Io)?.is_file() {
+                fs::remove_file(entry.path()).await.map_err(ApplicationError::Io)?;
+            }
+        }
+
+        stats.total_entries = 0;
+        stats.expired_entries = 0;
+
+        info!("Cleared all cache entries");
+        Ok(())
+    }
+
+    /// Get cache size (number of entries)
+    pub async fn size(&self) -> Result<usize, ApplicationError> {
+        let stats = self.stats.lock().await;
+        Ok(stats.total_entries as usize)
+    }
+
+    /// Get the default TTL for this cache
+    pub fn default_ttl(&self) -> Duration {
+        self.default_ttl
+    }
+
+    /// Set a value with the default TTL
+    pub async fn set_with_default_ttl<T>(&self, key: &str, value: &T) -> Result<(), ApplicationError>
+    where
+        T: serde::Serialize + Send + Sync,
+    {
+        self.set(key, value, self.default_ttl).await
+    }
 }
 
 impl Drop for FileCacheRepository {

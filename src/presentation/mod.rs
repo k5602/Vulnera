@@ -8,6 +8,5 @@ pub mod models;
 pub mod routes;
 
 pub use controllers::*;
-pub use middleware::*;
 pub use models::*;
 pub use routes::*;

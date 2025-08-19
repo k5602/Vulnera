@@ -19,4 +19,13 @@ pub enum DomainError {
 
     #[error("Invalid input for field {field}: {message}")]
     InvalidInput { field: String, message: String },
+
+    #[error("Validation failed for {field}: {message}")]
+    ValidationFailed { field: String, message: String },
+
+    #[error("Resource not found: {resource} with id {id}")]
+    NotFound { resource: String, id: String },
+
+    #[error("Conflict: {message}")]
+    Conflict { message: String },
 }

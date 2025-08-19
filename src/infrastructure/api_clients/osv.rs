@@ -45,6 +45,7 @@ struct OsvSeverity {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct OsvReference {
     #[serde(rename = "type")]
     ref_type: String,
@@ -196,7 +197,7 @@ impl VulnerabilityApiClient for OsvClient {
 mod tests {
     use super::*;
     use crate::domain::{Ecosystem, Version};
-    use mockito::{Matcher, Server};
+    use mockito::Server;
     use serde_json::json;
 
     fn create_test_package() -> Package {

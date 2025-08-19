@@ -25,6 +25,30 @@ pub struct ServerConfig {
 pub struct CacheConfig {
     pub directory: PathBuf,
     pub ttl_hours: u64,
+    pub redis: Option<RedisConfig>,
+    pub strategy: CacheStrategy,
+}
+
+/// Redis configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedisConfig {
+    pub url: String,
+    pub pool_size: u32,
+    pub connection_timeout_seconds: u64,
+    pub command_timeout_seconds: u64,
+    pub retry_attempts: u32,
+    pub key_prefix: String,
+    pub enable_compression: bool,
+    pub max_key_length: usize,
+}
+
+/// Cache strategy configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CacheStrategy {
+    FileOnly,
+    RedisOnly,
+    RedisWithFileFallback,
+    Hybrid,
 }
 
 /// External API configuration
@@ -77,6 +101,8 @@ impl Default for Config {
             cache: CacheConfig {
                 directory: PathBuf::from(".vulnera_cache"),
                 ttl_hours: 24,
+                redis: None,
+                strategy: CacheStrategy::FileOnly,
             },
             apis: ApiConfig {
                 osv: OsvConfig {

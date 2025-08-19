@@ -601,7 +601,7 @@ async fn test_parser_performance_concurrent_parsing() {
     use std::time::Instant;
     use tokio::task::JoinSet;
 
-    let parser = npm::NpmParser::new();
+    let _parser = npm::NpmParser::new();
     let mut join_set = JoinSet::new();
 
     let start = Instant::now();

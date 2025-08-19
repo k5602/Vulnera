@@ -26,12 +26,15 @@ struct GraphQLResponse<T> {
 struct GraphQLError {
     message: String,
     #[serde(default)]
+    #[allow(dead_code)]
     locations: Vec<GraphQLLocation>,
 }
 
 #[derive(Debug, Deserialize)]
 struct GraphQLLocation {
+    #[allow(dead_code)]
     line: u32,
+    #[allow(dead_code)]
     column: u32,
 }
 
@@ -43,22 +46,22 @@ struct SecurityAdvisoriesResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct SecurityAdvisoriesConnection {
-    nodes: Vec<SecurityAdvisory>,
+pub struct SecurityAdvisoriesConnection {
+    pub nodes: Vec<SecurityAdvisory>,
     #[serde(rename = "pageInfo")]
-    page_info: PageInfo,
+    pub page_info: PageInfo,
 }
 
 #[derive(Debug, Deserialize)]
-struct PageInfo {
+pub struct PageInfo {
     #[serde(rename = "hasNextPage")]
-    has_next_page: bool,
+    pub has_next_page: bool,
     #[serde(rename = "endCursor")]
-    end_cursor: Option<String>,
+    pub end_cursor: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct SecurityAdvisory {
+pub struct SecurityAdvisory {
     #[serde(rename = "ghsaId")]
     ghsa_id: String,
     summary: String,
@@ -67,6 +70,7 @@ struct SecurityAdvisory {
     #[serde(rename = "publishedAt")]
     published_at: String,
     references: Vec<Reference>,
+    #[allow(dead_code)]
     vulnerabilities: SecurityAdvisoryVulnerabilities,
 }
 
@@ -77,26 +81,33 @@ struct Reference {
 
 #[derive(Debug, Deserialize)]
 struct SecurityAdvisoryVulnerabilities {
+    #[allow(dead_code)]
     nodes: Vec<Vulnerability>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Vulnerability {
+    #[allow(dead_code)]
     package: VulnerabilityPackage,
     #[serde(rename = "vulnerableVersionRange")]
+    #[allow(dead_code)]
     vulnerable_version_range: Option<String>,
     #[serde(rename = "firstPatchedVersion")]
+    #[allow(dead_code)]
     first_patched_version: Option<FirstPatchedVersion>,
 }
 
 #[derive(Debug, Deserialize)]
 struct VulnerabilityPackage {
+    #[allow(dead_code)]
     name: String,
+    #[allow(dead_code)]
     ecosystem: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct FirstPatchedVersion {
+    #[allow(dead_code)]
     identifier: String,
 }
 

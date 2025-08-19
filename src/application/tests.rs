@@ -596,5 +596,5 @@ async fn test_cache_service_cleanup() {
 
     // Trigger cleanup
     let cleaned_count = cache_service.cleanup_expired_entries().await.unwrap();
-    assert!(cleaned_count >= 0); // Should clean up expired entries
+    assert!(cleaned_count > 0); // Should clean up at least one expired entry
 }

@@ -59,9 +59,10 @@ pub async fn detailed_health_check(
         dependency_statuses.insert(
             "cache_statistics".to_string(),
             json!({
-                "hit_rate": cache_stats.hit_rate,
-                "total_entries": cache_stats.total_entries,
-                "total_size_bytes": cache_stats.total_size_bytes
+                "hit_rate": cache_stats.hit_rate(),
+                "total_hits": cache_stats.total_hits(),
+                "total_misses": cache_stats.total_misses(),
+                "cache_type": cache_stats.cache_type()
             }),
         );
     }
@@ -179,7 +180,7 @@ pub async fn metrics(State(app_state): State<AppState>) -> Result<String, Status
             "# HELP vulnera_cache_hits_total Total number of cache hits\n"
         ));
         metrics.push_str(&format!("# TYPE vulnera_cache_hits_total counter\n"));
-        metrics.push_str(&format!("vulnera_cache_hits_total {}\n", cache_stats.hits));
+        metrics.push_str(&format!("vulnera_cache_hits_total {}\n", cache_stats.total_hits()));
 
         metrics.push_str(&format!(
             "# HELP vulnera_cache_misses_total Total number of cache misses\n"
@@ -187,7 +188,7 @@ pub async fn metrics(State(app_state): State<AppState>) -> Result<String, Status
         metrics.push_str(&format!("# TYPE vulnera_cache_misses_total counter\n"));
         metrics.push_str(&format!(
             "vulnera_cache_misses_total {}\n",
-            cache_stats.misses
+            cache_stats.total_misses()
         ));
 
         metrics.push_str(&format!(
@@ -196,25 +197,16 @@ pub async fn metrics(State(app_state): State<AppState>) -> Result<String, Status
         metrics.push_str(&format!("# TYPE vulnera_cache_hit_rate gauge\n"));
         metrics.push_str(&format!(
             "vulnera_cache_hit_rate {}\n",
-            cache_stats.hit_rate
+            cache_stats.hit_rate()
         ));
 
         metrics.push_str(&format!(
-            "# HELP vulnera_cache_entries_total Total number of cache entries\n"
+            "# HELP vulnera_cache_type Cache type information\n"
         ));
-        metrics.push_str(&format!("# TYPE vulnera_cache_entries_total gauge\n"));
+        metrics.push_str(&format!("# TYPE vulnera_cache_type info\n"));
         metrics.push_str(&format!(
-            "vulnera_cache_entries_total {}\n",
-            cache_stats.total_entries
-        ));
-
-        metrics.push_str(&format!(
-            "# HELP vulnera_cache_size_bytes Total cache size in bytes\n"
-        ));
-        metrics.push_str(&format!("# TYPE vulnera_cache_size_bytes gauge\n"));
-        metrics.push_str(&format!(
-            "vulnera_cache_size_bytes {}\n",
-            cache_stats.total_size_bytes
+            "vulnera_cache_type{{type=\"{}\"}} 1\n",
+            cache_stats.cache_type()
         ));
     }
 

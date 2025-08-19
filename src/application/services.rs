@@ -68,7 +68,7 @@ pub trait AnalysisService: Send + Sync {
 pub trait CacheService: Send + Sync {
     async fn get<T>(&self, key: &str) -> Result<Option<T>, ApplicationError>
     where
-        T: serde::de::DeserializeOwned + Send;
+        T: serde::de::DeserializeOwned + serde::Serialize + Send + Sync;
 
     async fn set<T>(&self, key: &str, value: &T, ttl: Duration) -> Result<(), ApplicationError>
     where
@@ -294,7 +294,7 @@ pub struct CacheStatistics {
 impl CacheService for CacheServiceImpl {
     async fn get<T>(&self, key: &str) -> Result<Option<T>, ApplicationError>
     where
-        T: serde::de::DeserializeOwned + Send,
+        T: serde::de::DeserializeOwned + serde::Serialize + Send + Sync,
     {
         self.cache_repository.get(key).await
     }
@@ -689,6 +689,11 @@ impl<C: CacheService> AnalysisServiceImpl<C> {
             cache_service,
             max_concurrent_requests,
         }
+    }
+
+    /// Get the maximum number of concurrent requests allowed
+    pub fn max_concurrent_requests(&self) -> usize {
+        self.max_concurrent_requests
     }
 
     /// Parse dependency file content into packages

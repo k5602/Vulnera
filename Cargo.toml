@@ -51,6 +51,14 @@ uuid = { version = "1.18.0", features = ["v4", "serde"] }
 # Hashing for cache keys
 sha2 = "0.10.8"
 hex = "0.4.3"
+
+# Redis caching
+redis = { version = "0.27.5", features = ["tokio-comp", "connection-manager", "streams", "json"] }
+deadpool-redis = "0.18.0"
+
+# HTTP date formatting
+httpdate = "1.0.3"
+
 # File parsing
 toml = "0.9.5"
 serde_yaml = "0.9.34"

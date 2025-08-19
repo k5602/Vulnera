@@ -113,7 +113,7 @@ impl VulnerabilityListQuery {
 #[derive(Clone)]
 pub struct AppState {
     pub analysis_service: Arc<dyn crate::application::AnalysisService>,
-    pub cache_service: Arc<crate::application::CacheServiceImpl>,
+    pub cache_service: Arc<crate::infrastructure::cache::cache_service_wrapper::CacheServiceWrapper>,
     pub report_service: Arc<crate::application::ReportServiceImpl>,
 }
 

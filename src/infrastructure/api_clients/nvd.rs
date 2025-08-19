@@ -75,6 +75,7 @@ impl RateLimiter {
 
 /// NVD API response for CVE search
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct NvdSearchResponse {
     #[serde(rename = "vulnerabilities")]
     vulnerabilities: Vec<NvdVulnerabilityWrapper>,
@@ -88,6 +89,7 @@ struct NvdVulnerabilityWrapper {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct NvdCve {
     id: String,
     #[serde(rename = "sourceIdentifier")]
@@ -119,6 +121,7 @@ struct NvdMetrics {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct NvdCvssMetric {
     source: String,
     #[serde(rename = "type")]
@@ -128,6 +131,7 @@ struct NvdCvssMetric {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct NvdCvssMetricV2 {
     source: String,
     #[serde(rename = "type")]
@@ -137,6 +141,7 @@ struct NvdCvssMetricV2 {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct NvdCvssData {
     version: String,
     #[serde(rename = "baseScore")]
@@ -146,6 +151,7 @@ struct NvdCvssData {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct NvdCvssDataV2 {
     version: String,
     #[serde(rename = "baseScore")]
@@ -153,6 +159,7 @@ struct NvdCvssDataV2 {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct NvdReference {
     url: String,
     source: Option<String>,
@@ -438,7 +445,7 @@ impl VulnerabilityApiClient for NvdClient {
 mod tests {
     use super::*;
     use crate::domain::{Ecosystem, Version};
-    use mockito::{Matcher, Server};
+    use mockito::Server;
     use serde_json::json;
 
     fn create_test_package() -> Package {

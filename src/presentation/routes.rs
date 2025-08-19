@@ -1,7 +1,7 @@
 //! Route definitions and server setup
 
 use axum::{
-    Router, middleware,
+    Router,
     routing::{get, post},
 };
 use std::time::Duration;
@@ -20,9 +20,13 @@ use crate::presentation::{
             AppState, analyze_dependencies, get_analysis_report, get_vulnerability,
             list_vulnerabilities,
         },
+        cache::{
+            check_cache_health, clear_cache, get_cache_key_info, get_cache_stats,
+            invalidate_cache_keys, warm_cache,
+        },
         health::{detailed_health_check, health_check, liveness_probe, metrics, readiness_probe},
     },
-    middleware::logging_middleware,
+
     models::*,
 };
 use axum::{
@@ -105,6 +109,14 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/health/ready", get(readiness_probe))
         .route("/metrics", get(metrics));
 
+    let cache_routes = Router::new()
+        .route("/cache/stats", get(get_cache_stats))
+        .route("/cache/health", get(check_cache_health))
+        .route("/cache/clear", post(clear_cache))
+        .route("/cache/invalidate", post(invalidate_cache_keys))
+        .route("/cache/warm", post(warm_cache))
+        .route("/cache/keys/:key", get(get_cache_key_info));
+
     // Create CORS layer with proper configuration
     let cors_layer = CorsLayer::new()
         .allow_origin(Any)
@@ -124,6 +136,7 @@ pub fn create_router(app_state: AppState) -> Router {
 
     Router::new()
         .nest("/api/v1", api_routes)
+        .nest("/admin", cache_routes)
         .merge(health_routes)
         .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi()))
         // Serve documentation resources
@@ -136,16 +149,61 @@ pub fn create_router(app_state: AppState) -> Router {
                 // CORS handling
                 .layer(cors_layer)
                 // Request timeout (30 seconds)
-                .layer(TimeoutLayer::new(Duration::from_secs(30)))
-                // Custom logging middleware
-                .layer(middleware::from_fn(logging_middleware)),
+                .layer(TimeoutLayer::new(Duration::from_secs(30))),
         )
         .with_state(app_state)
 }
 
 /// Serve API examples and usage guide
 async fn serve_api_examples() -> Response {
-    let examples_content = include_str!("../../docs/api-examples.md");
+    let examples_content = r#"# Vulnera API Examples
+
+## Basic Usage
+
+### Analyze Dependencies
+```bash
+curl -X POST http://localhost:3000/api/v1/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "file_content": "express@4.18.0\nlodash@4.17.21",
+    "ecosystem": "npm"
+  }'
+```
+
+### Get Vulnerability Details
+```bash
+curl http://localhost:3000/api/v1/vulnerabilities/CVE-2023-1234
+```
+
+### List Vulnerabilities
+```bash
+curl "http://localhost:3000/api/v1/vulnerabilities?page=1&limit=10&severity=high"
+```
+
+## Cache Management
+
+### Get Cache Statistics
+```bash
+curl http://localhost:3000/admin/cache/stats
+```
+
+### Clear Cache
+```bash
+curl -X POST http://localhost:3000/admin/cache/clear
+```
+
+## Health Checks
+
+### Basic Health Check
+```bash
+curl http://localhost:3000/health
+```
+
+### Detailed Health Check
+```bash
+curl http://localhost:3000/health/detailed
+```
+"#;
 
     // Convert markdown to HTML (basic conversion for now)
     let html_content = format!(
@@ -231,7 +289,36 @@ async fn serve_api_examples() -> Response {
 
 /// Serve API versioning and deprecation information
 async fn serve_versioning_info() -> Response {
-    let versioning_content = include_str!("../../docs/api-versioning.md");
+    let versioning_content = r#"# Vulnera API Versioning
+
+## Current Version: v1.0.0
+
+### Supported Versions
+- **v1.0**: Current stable version
+- **v0.9**: Deprecated (will be removed in v1.1)
+
+### Version Headers
+All API responses include version information:
+- `API-Version`: Current API version
+- `Supported-Versions`: List of supported versions
+
+### Breaking Changes
+- v1.0.0: Initial stable release
+- Future versions will follow semantic versioning
+
+### Deprecation Policy
+- Deprecated endpoints will be marked in documentation
+- 6-month notice before removal
+- Migration guides provided for breaking changes
+
+### Version Selection
+Use the `Accept-Version` header to specify API version:
+```
+Accept-Version: 1.0
+```
+
+If no version is specified, the latest stable version is used.
+"#;
 
     let html_content = format!(
         r#"<!DOCTYPE html>

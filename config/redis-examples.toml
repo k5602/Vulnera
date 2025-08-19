@@ -1,0 +1,238 @@
+# Redis Cache Configuration Examples
+# Copy sections to your config/local.toml or config/production.toml as needed
+
+# =============================================================================
+# DEVELOPMENT CONFIGURATION
+# =============================================================================
+[cache]
+directory = ".vulnera_cache"
+ttl_hours = 1  # Short TTL for development
+strategy = "RedisWithFileFallback"  # Fallback to file cache if Redis unavailable
+
+[cache.redis]
+url = "redis://localhost:6379"
+pool_size = 5  # Small pool for development
+connection_timeout_seconds = 5
+command_timeout_seconds = 3
+retry_attempts = 3
+key_prefix = "vulnera:dev:"
+enable_compression = false  # Disable for easier debugging
+max_key_length = 250
+
+# =============================================================================
+# PRODUCTION CONFIGURATION
+# =============================================================================
+# [cache]
+# directory = "/var/cache/vulnera"
+# ttl_hours = 24
+# strategy = "Hybrid"  # Use both Redis and file cache for maximum reliability
+
+# [cache.redis]
+# url = "redis://redis-cluster:6379"
+# pool_size = 20  # Larger pool for production load
+# connection_timeout_seconds = 10
+# command_timeout_seconds = 5
+# retry_attempts = 5
+# key_prefix = "vulnera:prod:"
+# enable_compression = true  # Enable compression to save memory
+# max_key_length = 250
+
+# =============================================================================
+# HIGH AVAILABILITY CONFIGURATION
+# =============================================================================
+# [cache]
+# directory = "/var/cache/vulnera"
+# ttl_hours = 12
+# strategy = "RedisWithFileFallback"
+
+# [cache.redis]
+# url = "redis://redis-ha-proxy:6379"  # Use Redis Sentinel or Cluster
+# pool_size = 30
+# connection_timeout_seconds = 15
+# command_timeout_seconds = 10
+# retry_attempts = 10
+# key_prefix = "vulnera:ha:"
+# enable_compression = true
+# max_key_length = 250
+
+# =============================================================================
+# TESTING CONFIGURATION
+# =============================================================================
+# [cache]
+# directory = "/tmp/vulnera_test_cache"
+# ttl_hours = 1
+# strategy = "FileOnly"  # Use file cache only for tests
+
+# No Redis configuration needed for FileOnly strategy
+
+# =============================================================================
+# REDIS CLUSTER CONFIGURATION
+# =============================================================================
+# [cache]
+# directory = "/var/cache/vulnera"
+# ttl_hours = 24
+# strategy = "RedisOnly"
+
+# [cache.redis]
+# url = "redis://redis-node1:6379,redis-node2:6379,redis-node3:6379"
+# pool_size = 50
+# connection_timeout_seconds = 20
+# command_timeout_seconds = 15
+# retry_attempts = 10
+# key_prefix = "vulnera:cluster:"
+# enable_compression = true
+# max_key_length = 250
+
+# =============================================================================
+# MEMORY-OPTIMIZED CONFIGURATION
+# =============================================================================
+# [cache]
+# directory = "/var/cache/vulnera"
+# ttl_hours = 6  # Shorter TTL to reduce memory usage
+# strategy = "RedisOnly"
+
+# [cache.redis]
+# url = "redis://redis-memory-optimized:6379"
+# pool_size = 15
+# connection_timeout_seconds = 10
+# command_timeout_seconds = 5
+# retry_attempts = 5
+# key_prefix = "vulnera:mem:"
+# enable_compression = true  # Always enable compression for memory optimization
+# max_key_length = 200  # Shorter keys to save memory
+
+# =============================================================================
+# DOCKER COMPOSE CONFIGURATION
+# =============================================================================
+# For use with docker-compose.yml Redis service
+# [cache]
+# directory = "/app/cache"
+# ttl_hours = 12
+# strategy = "RedisWithFileFallback"
+
+# [cache.redis]
+# url = "redis://redis:6379"  # Use service name from docker-compose
+# pool_size = 10
+# connection_timeout_seconds = 10
+# command_timeout_seconds = 5
+# retry_attempts = 5
+# key_prefix = "vulnera:docker:"
+# enable_compression = true
+# max_key_length = 250
+
+# =============================================================================
+# KUBERNETES CONFIGURATION
+# =============================================================================
+# For use in Kubernetes with Redis service
+# [cache]
+# directory = "/var/cache/vulnera"
+# ttl_hours = 24
+# strategy = "Hybrid"
+
+# [cache.redis]
+# url = "redis://redis-service.default.svc.cluster.local:6379"
+# pool_size = 25
+# connection_timeout_seconds = 15
+# command_timeout_seconds = 10
+# retry_attempts = 8
+# key_prefix = "vulnera:k8s:"
+# enable_compression = true
+# max_key_length = 250
+
+# =============================================================================
+# REDIS SENTINEL CONFIGURATION
+# =============================================================================
+# For Redis Sentinel setup (high availability)
+# [cache]
+# directory = "/var/cache/vulnera"
+# ttl_hours = 24
+# strategy = "RedisWithFileFallback"
+
+# [cache.redis]
+# url = "redis-sentinel://sentinel1:26379,sentinel2:26379,sentinel3:26379/mymaster"
+# pool_size = 20
+# connection_timeout_seconds = 20
+# command_timeout_seconds = 10
+# retry_attempts = 10
+# key_prefix = "vulnera:sentinel:"
+# enable_compression = true
+# max_key_length = 250
+
+# =============================================================================
+# PERFORMANCE TESTING CONFIGURATION
+# =============================================================================
+# For load testing and performance benchmarking
+# [cache]
+# directory = "/tmp/vulnera_perf_cache"
+# ttl_hours = 2
+# strategy = "RedisOnly"
+
+# [cache.redis]
+# url = "redis://redis-perf:6379"
+# pool_size = 100  # Large pool for high concurrency testing
+# connection_timeout_seconds = 30
+# command_timeout_seconds = 20
+# retry_attempts = 15
+# key_prefix = "vulnera:perf:"
+# enable_compression = false  # Disable compression for pure performance testing
+# max_key_length = 300
+
+# =============================================================================
+# DEBUGGING CONFIGURATION
+# =============================================================================
+# For debugging cache issues
+# [cache]
+# directory = "/tmp/vulnera_debug_cache"
+# ttl_hours = 24
+# strategy = "FileOnly"  # Use file cache for easier inspection
+
+# No Redis configuration - using file cache only for debugging
+
+# =============================================================================
+# MULTI-TENANT CONFIGURATION
+# =============================================================================
+# For multi-tenant deployments
+# [cache]
+# directory = "/var/cache/vulnera"
+# ttl_hours = 24
+# strategy = "Hybrid"
+
+# [cache.redis]
+# url = "redis://redis-multitenant:6379"
+# pool_size = 30
+# connection_timeout_seconds = 15
+# command_timeout_seconds = 10
+# retry_attempts = 8
+# key_prefix = "vulnera:tenant1:"  # Different prefix per tenant
+# enable_compression = true
+# max_key_length = 250
+
+# =============================================================================
+# EDGE DEPLOYMENT CONFIGURATION
+# =============================================================================
+# For edge/CDN deployments with limited resources
+# [cache]
+# directory = "/var/cache/vulnera"
+# ttl_hours = 48  # Longer TTL for edge caching
+# strategy = "FileOnly"  # File cache only for edge nodes
+
+# No Redis configuration - edge nodes use local file cache only
+
+# =============================================================================
+# BACKUP/DISASTER RECOVERY CONFIGURATION
+# =============================================================================
+# For backup and disaster recovery scenarios
+# [cache]
+# directory = "/backup/vulnera_cache"
+# ttl_hours = 72  # Longer TTL for backup scenarios
+# strategy = "RedisWithFileFallback"
+
+# [cache.redis]
+# url = "redis://redis-backup:6379"
+# pool_size = 10
+# connection_timeout_seconds = 30  # Longer timeouts for backup scenarios
+# command_timeout_seconds = 20
+# retry_attempts = 20  # More retries for unreliable backup networks
+# key_prefix = "vulnera:backup:"
+# enable_compression = true
+# max_key_length = 250
