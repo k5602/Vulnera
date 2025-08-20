@@ -7,7 +7,9 @@ use vulnera_rust::{
     Config,
     application::{AnalysisServiceImpl, CacheServiceImpl, ReportServiceImpl},
     infrastructure::{
-        cache::file_cache::FileCacheRepository, parsers::ParserFactory,
+        api_clients::{ghsa::GhsaClient, nvd::NvdClient, osv::OsvClient},
+        cache::file_cache::FileCacheRepository,
+        parsers::ParserFactory,
         repositories::AggregatingVulnerabilityRepository,
     },
     init_tracing,
@@ -39,7 +41,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     let cache_service = Arc::new(CacheServiceImpl::new(cache_repository));
     let parser_factory = Arc::new(ParserFactory::new());
-    let vulnerability_repository = Arc::new(AggregatingVulnerabilityRepository::new());
+
+    // Create API clients
+    let osv_client = Arc::new(OsvClient::new("https://api.osv.dev".to_string()));
+    let nvd_client = Arc::new(NvdClient::new(
+        "https://services.nvd.nist.gov/rest/json".to_string(),
+        None, // No API key by default
+    ));
+    let ghsa_client = Arc::new(GhsaClient::new(
+        "github_token".to_string(), // TODO: Load from config
+        "https://api.github.com/graphql".to_string(),
+    ));
+
+    let vulnerability_repository = Arc::new(AggregatingVulnerabilityRepository::new(
+        osv_client,
+        nvd_client,
+        ghsa_client,
+    ));
+
     let analysis_service = Arc::new(AnalysisServiceImpl::new(
         parser_factory,
         vulnerability_repository,
