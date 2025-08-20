@@ -3,34 +3,38 @@ name: Deploy Frontend to Azure Storage
 on:
   push:
     branches:
-      - main   # أو أي برانش حابب تعمل منه نشر
+      - main   # غيّرها للفرع اللي عندك
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Set up Node.js
+      - name: Setup Node
         uses: actions/setup-node@v3
         with:
-          node-version: '18'   # يفضل Node LTS أو اللي شغال مع Vite عندك
+          node-version: '18'
 
-      - name: Install dependencies and build
-        run: |
-          cd frontend
-          npm install
-          npm run build
+      - name: Install dependencies
+        working-directory: ./frontend   # لو فولدر اسمه frontend
+        run: npm install
 
-      - name: Upload to Azure Blob Storage
-        uses: azure/cli@v1
+      - name: Build project
+        working-directory: ./frontend
+        run: npm run build
+
+      - name: Upload to Azure Storage
+        uses: azure/CLI@v1
         with:
           inlineScript: |
             az storage blob upload-batch \
-              --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-              --account-key ${{ secrets.AZURE_STORAGE_KEY }} \
+              --account-name vulnerastorageaccount \
               --auth-mode key \
-              --destination '$web' \
-              --source frontend/dist
+              -s ./frontend/dist \
+              -d '$web' \
+              --overwrite true
+        env:
+          AZURE_STORAGE_KEY: ${{ secrets.AZURE_STORAGE_KEY }}
