@@ -23,6 +23,115 @@ A comprehensive, high-performance vulnerability analysis API built with Rust, de
 - **Memory**: Minimum 512MB RAM (2GB+ recommended for production)
 - **Storage**: ~100MB for application + cache storage
 
+
+# 🌐 Vulnera Rust - AWS Architecture Overview
+
+![Architecture Diagram](./AWS2.png)
+
+---
+
+## 🚀 Executive Summary
+
+This diagram illustrates a **highly scalable, resilient, and serverless architecture** for a modern web application on **AWS**.  
+It features two automated workflows:
+
+1. **User Request Flow** – real-time application functionality  
+2. **CI/CD Deployment Flow** – continuous deployment for engineering velocity
+
+**Key Principles:**
+- Serverless-first design → focus on business logic, not infrastructure
+- Decoupled frontend & backend → independent development, deployment, and scaling
+
+---
+
+## 🏗️ Architectural Deep Dive
+
+### 1️⃣ Global Delivery & Edge Layer
+**![CloudFront](https://img.shields.io/badge/AWS-CloudFront-orange?logo=amazon-aws&logoColor=white)**  
+
+> **Benefits:**
+> - ⚡ **Performance:** Edge caching for low latency  
+> - 🛡️ **Security:** DDoS protection + AWS WAF  
+> - 💰 **Cost Optimization:** Fewer origin requests → lower costs
+
+---
+
+### 2️⃣ Frontend Hosting & Application Layer
+**![Amplify](https://img.shields.io/badge/AWS-Amplify-yellow?logo=amazon-aws&logoColor=white)**  
+
+> **Advantages:**
+> - Git-integrated deployments  
+> - Atomic updates on every push → zero downtime
+
+---
+
+### 3️⃣ API & Ingress Layer
+**![API Gateway](https://img.shields.io/badge/AWS-API%20Gateway-red?logo=amazon-aws&logoColor=white)**  
+
+> **Features:**
+> - 🚦 **Request Routing:** Routes to correct Lambda  
+> - 🛑 **Traffic Management:** Throttling, caching, rate limiting  
+> - 🔐 **Security:** Auth & authorization (JWT/IAM)
+
+---
+
+### 4️⃣ Serverless Compute Layer
+**![Lambda](https://img.shields.io/badge/AWS-Lambda-purple?logo=amazon-aws&logoColor=white) & ![ECR](https://img.shields.io/badge/AWS-ECR-blue?logo=amazon-aws&logoColor=white)**  
+
+- **Lambda:** Event-driven compute, auto-scalable  
+- **ECR:** Containerized Lambda deployments
+
+> **Why Docker for Lambda?**
+> - 📦 Handles complex dependencies & custom runtimes  
+> - ✅ Immutable artifacts for consistent deployments  
+> - ⚙️ Aligns with modern DevOps/container workflows
+
+---
+
+### 5️⃣ Security & Observability
+- **IAM Roles:** Least privilege for Lambda functions  
+- **Amazon CloudWatch:** Logs, metrics, performance monitoring, alerting
+
+---
+
+## 🔄 Core Workflows
+
+### 1️⃣ CI/CD Deployment Lifecycle
+
+| Step | Description |
+|------|-------------|
+| 1️⃣ Code Commit | Developer pushes changes to GitHub |
+| 2️⃣ Workflow Trigger | `git push` triggers **GitHub Actions** |
+| 3️⃣ Parallel Builds | **Frontend:** Build SPA → Deploy to **Amplify** <br> **Backend:** Build Docker → Push to **ECR** → Update Lambda |
+
+---
+
+### 2️⃣ User Request Lifecycle
+
+| Step | Description |
+|------|-------------|
+| 1️⃣ Initiation | User triggers API call via frontend (Amplify + CloudFront) |
+| 2️⃣ Ingress | HTTPS request → **API Gateway** (auth & security) |
+| 3️⃣ Invocation | Gateway calls **Lambda** function |
+| 4️⃣ Execution | Lambda runs containerized code under **IAM Role** |
+| 5️⃣ Response | JSON response sent back to API Gateway |
+| 6️⃣ Egress | API Gateway → User browser updates UI |
+| 7️⃣ Logging | Metrics & logs streamed to **CloudWatch** |
+
+---
+
+## 🎯 Benefits
+
+- **Scalable:** Auto-scaling serverless services  
+- **Resilient:** Stateless design, CDN caching, multi-AZ support  
+- **Secure:** IAM, WAF, least privilege principles  
+- **Operationally Efficient:** CI/CD automation, serverless management, CloudWatch observability
+
+---
+
+*This setup ensures modern, cloud-native deployment practices with focus on performance, security, and developer productivity.*
+
+
 ## Installation
 
 ### From Source
