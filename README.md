@@ -110,13 +110,13 @@ It features two automated workflows:
 
 | Step | Description |
 |------|-------------|
-| 1️⃣  Initiation | User triggers API call via frontend (Amplify + CloudFront) |
-| 2️⃣  Ingress | HTTPS request → **API Gateway** (auth & security) |
-| 3️⃣  Invocation | Gateway calls **Lambda** function |
-| 4️⃣  Execution | Lambda runs containerized code under **IAM Role** |
-| 5️⃣  Response | JSON response sent back to API Gateway |
-| 6️⃣  Egress | API Gateway → User browser updates UI |
-| 7️⃣  Logging | Metrics & logs streamed to **CloudWatch** |
+| Initiation | User triggers API call via frontend (Amplify + CloudFront) |
+| Ingress | HTTPS request → **API Gateway** (auth & security) |
+| Invocation | Gateway calls **Lambda** function |
+| Execution | Lambda runs containerized code under **IAM Role** |
+| Response | JSON response sent back to API Gateway |
+| Egress | API Gateway → User browser updates UI |
+| Logging | Metrics & logs streamed to **CloudWatch** |
 
 ---
 
