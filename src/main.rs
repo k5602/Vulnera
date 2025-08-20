@@ -5,7 +5,9 @@ use tokio::{net::TcpListener, signal};
 
 use vulnera_rust::{
     Config,
-    application::{AnalysisServiceImpl, CacheServiceImpl, ReportServiceImpl},
+    application::{
+        AnalysisServiceImpl, CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl,
+    },
     infrastructure::{
         api_clients::{ghsa::GhsaClient, nvd::NvdClient, osv::OsvClient},
         cache::file_cache::FileCacheRepository,
@@ -69,12 +71,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     let report_service = Arc::new(ReportServiceImpl::new());
 
+    // Create popular package service with config
+    let config_arc = Arc::new(config.clone());
+    let popular_package_service = Arc::new(PopularPackageServiceImpl::new(
+        vulnerability_repository.clone(),
+        cache_service.clone(),
+        config_arc,
+    ));
+
     // Create application state
     let app_state = AppState {
         analysis_service,
         cache_service,
         report_service,
         vulnerability_repository,
+        popular_package_service,
     };
 
     // Create router

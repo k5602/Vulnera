@@ -19,7 +19,7 @@ use crate::presentation::{
     controllers::{
         analysis::{
             AppState, analyze_dependencies, get_analysis_report, get_vulnerability,
-            list_vulnerabilities,
+            list_vulnerabilities, refresh_vulnerability_cache,
         },
         health::{detailed_health_check, health_check, liveness_probe, metrics, readiness_probe},
     },
@@ -38,6 +38,7 @@ use axum::{
         crate::presentation::controllers::analysis::analyze_dependencies,
         crate::presentation::controllers::analysis::get_vulnerability,
         crate::presentation::controllers::analysis::list_vulnerabilities,
+        crate::presentation::controllers::analysis::refresh_vulnerability_cache,
         crate::presentation::controllers::analysis::get_analysis_report,
         crate::presentation::controllers::health::health_check,
         crate::presentation::controllers::health::detailed_health_check,
@@ -96,6 +97,10 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
     let api_routes = Router::new()
         .route("/analyze", post(analyze_dependencies))
         .route("/vulnerabilities", get(list_vulnerabilities))
+        .route(
+            "/vulnerabilities/refresh-cache",
+            post(refresh_vulnerability_cache),
+        )
         .route("/vulnerabilities/{id}", get(get_vulnerability))
         .route("/reports/{id}", get(get_analysis_report));
 

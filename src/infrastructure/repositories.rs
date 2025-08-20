@@ -11,8 +11,8 @@ use tracing::{debug, error, info, warn};
 use super::api_clients::traits::{RawVulnerability, VulnerabilityApiClient};
 use crate::application::errors::VulnerabilityError;
 use crate::domain::{
-    AffectedPackage, Package, Severity, Version, VersionRange, Vulnerability, VulnerabilityId,
-    VulnerabilitySource, Ecosystem,
+    AffectedPackage, Ecosystem, Package, Severity, Version, VersionRange, Vulnerability,
+    VulnerabilityId, VulnerabilitySource,
 };
 
 /// Repository trait for vulnerability data access
@@ -67,7 +67,7 @@ impl AggregatingVulnerabilityRepository {
 
         // Create affected packages from raw vulnerability data
         let mut affected_packages = Vec::new();
-        
+
         for affected_data in &raw.affected {
             // Convert ecosystem string to domain enum
             let ecosystem = match affected_data.package.ecosystem.as_str() {
@@ -110,11 +110,12 @@ impl AggregatingVulnerabilityRepository {
                     }
 
                     // Create version range based on available data
-                    if let (Some(introduced), Some(fixed)) = (introduced_version.clone(), fixed_version.clone()) {
-                        if let (Ok(intro_ver), Ok(fix_ver)) = (
-                            Version::parse(&introduced),
-                            Version::parse(&fixed),
-                        ) {
+                    if let (Some(introduced), Some(fixed)) =
+                        (introduced_version.clone(), fixed_version.clone())
+                    {
+                        if let (Ok(intro_ver), Ok(fix_ver)) =
+                            (Version::parse(&introduced), Version::parse(&fixed))
+                        {
                             affected_version_ranges.push(VersionRange::new(
                                 Some(intro_ver),
                                 Some(fix_ver),
@@ -151,7 +152,10 @@ impl AggregatingVulnerabilityRepository {
                     let affected_package = AffectedPackage::new(
                         package,
                         affected_version_ranges,
-                        fixed_versions.into_iter().filter_map(|v| Version::parse(&v).ok()).collect(),
+                        fixed_versions
+                            .into_iter()
+                            .filter_map(|v| Version::parse(&v).ok())
+                            .collect(),
                     );
                     affected_packages.push(affected_package);
                 }
@@ -449,16 +453,22 @@ impl AggregatingVulnerabilityRepository {
                     // Use a placeholder package since we now extract affected packages from the vulnerability data
                     let placeholder_package = Package::new(
                         "placeholder".to_string(),
-                        Version::parse("0.0.0").map_err(|e| VulnerabilityError::DomainCreation {
-                            message: format!("Failed to parse placeholder version: {}", e),
+                        Version::parse("0.0.0").map_err(|e| {
+                            VulnerabilityError::DomainCreation {
+                                message: format!("Failed to parse placeholder version: {}", e),
+                            }
                         })?,
                         crate::domain::Ecosystem::Npm,
                     )
-                    .map_err(|e| VulnerabilityError::DomainCreation { 
-                        message: format!("Failed to create placeholder package: {}", e) 
+                    .map_err(|e| VulnerabilityError::DomainCreation {
+                        message: format!("Failed to create placeholder package: {}", e),
                     })?;
 
-                    match self.convert_raw_vulnerability(raw_vuln, source.clone(), &placeholder_package) {
+                    match self.convert_raw_vulnerability(
+                        raw_vuln,
+                        source.clone(),
+                        &placeholder_package,
+                    ) {
                         Ok(vulnerability) => vulnerabilities.push(vulnerability),
                         Err(e) => {
                             error!("Failed to convert vulnerability from {:?}: {}", source, e);

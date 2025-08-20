@@ -10,6 +10,26 @@ pub struct Config {
     pub cache: CacheConfig,
     pub apis: ApiConfig,
     pub logging: LoggingConfig,
+    pub popular_packages: Option<PopularPackagesConfig>,
+}
+
+/// Popular packages configuration for vulnerability listing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PopularPackagesConfig {
+    pub cache_ttl_hours: Option<u64>,
+    pub npm: Option<Vec<PackageConfig>>,
+    pub pypi: Option<Vec<PackageConfig>>,
+    pub maven: Option<Vec<PackageConfig>>,
+    pub cargo: Option<Vec<PackageConfig>>,
+    pub go: Option<Vec<PackageConfig>>,
+    pub packagist: Option<Vec<PackageConfig>>,
+}
+
+/// Individual package configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackageConfig {
+    pub name: String,
+    pub version: String,
 }
 
 /// Server configuration
@@ -108,6 +128,7 @@ impl Default for Config {
                 level: "info".to_string(),
                 format: "json".to_string(),
             },
+            popular_packages: None,
         }
     }
 }
