@@ -10,11 +10,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout source code
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # 2. Install Rust (if you need to build before Docker)
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
         with:
@@ -24,7 +22,6 @@ jobs:
       - name: Build Rust project
         run: cargo build --release
 
-      # 3. Azure Container Registry login
       - name: Azure Container Registry Login
         uses: azure/docker-login@v1
         with:
@@ -32,14 +29,12 @@ jobs:
           username: ${{ secrets.AZURE_ACR_USERNAME }}
           password: ${{ secrets.AZURE_ACR_PASSWORD }}
 
-      # 4. Build Docker image
       - name: Build Docker image
         run: |
           docker build \
             -t ecrvubnera.azurecr.io/vulnera-app:latest \
             -t ecrvubnera.azurecr.io/vulnera-app:${{ github.sha }} .
 
-      # 5. Push Docker image
       - name: Push Docker image
         run: |
           docker push ecrvubnera.azurecr.io/vulnera-app:latest
