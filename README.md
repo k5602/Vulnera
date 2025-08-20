@@ -32,7 +32,15 @@ A comprehensive, high-performance vulnerability analysis API built with Rust, de
 
 ## 🚀 Executive Summary
 
-This diagram illustrates a **highly scalable, resilient, and serverless architecture** for a modern web application on **AWS**.  
+# 🌐 Vulnera Rust - Azure Architecture Overview
+
+![Architecture Diagram](./Azure2.png)
+
+---
+
+## 🚀 Executive Summary
+
+This diagram illustrates a **highly scalable, resilient, and serverless architecture** for a modern web application on **Azure**.  
 It features two automated workflows:
 
 1. **User Request Flow** – real-time application functionality  
