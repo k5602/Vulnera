@@ -1,36 +1,46 @@
-name: Deploy Frontend to Azure Storage
+name: Build and Push Docker Image
 
 on:
   push:
-    branches:
-      - main   
+    branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
-  build-and-deploy:
+  build-and-push:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Checkout source code
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
+      # 2. Install Rust (لو محتاج تبني قبل الـ Docker)
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
         with:
-          node-version: '18'  
+          toolchain: stable
+          override: true
 
-      - name: Install dependencies and build
+      - name: Build Rust project
+        run: cargo build --release
+
+      # 3. Azure Container Registry login
+      - name: Azure Container Registry Login
+        uses: azure/docker-login@v1
+        with:
+          login-server: ecrvubnera.azurecr.io
+          username: ${{ secrets.AZURE_ACR_USERNAME }}
+          password: ${{ secrets.AZURE_ACR_PASSWORD }}
+
+      # 4. Build Docker image
+      - name: Build Docker image
         run: |
-          cd frontend
-          npm install
-          npm run build
+          docker build \
+            -t ecrvubnera.azurecr.io/vulnera-app:latest \
+            -t ecrvubnera.azurecr.io/vulnera-app:${{ github.sha }} .
 
-      - name: Upload to Azure Blob Storage
-        uses: azure/cli@v1
-        with:
-          inlineScript: |
-            az storage blob upload-batch \
-              --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-              --account-key ${{ secrets.AZURE_STORAGE_KEY }} \
-              --auth-mode key \
-              --destination '$web' \
-              --source frontend/dist
+      # 5. Push Docker image
+      - name: Push Docker image
+        run: |
+          docker push ecrvubnera.azurecr.io/vulnera-app:latest
+          docker push ecrvubnera.azurecr.io/vulnera-app:${{ github.sha }}
