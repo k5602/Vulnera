@@ -87,6 +87,294 @@ pub trait ReportService: Send + Sync {
     ) -> Result<String, ApplicationError>;
 }
 
+/// Service for managing popular package vulnerabilities with efficient caching
+#[async_trait]
+pub trait PopularPackageService: Send + Sync {
+    async fn list_vulnerabilities(
+        &self,
+        page: u32,
+        per_page: u32,
+        ecosystem_filter: Option<&str>,
+        severity_filter: Option<&str>,
+    ) -> Result<PopularPackageVulnerabilityResult, ApplicationError>;
+
+    async fn refresh_cache(&self) -> Result<(), ApplicationError>;
+}
+
+/// Result for popular package vulnerability listing
+#[derive(Debug, Clone)]
+pub struct PopularPackageVulnerabilityResult {
+    pub vulnerabilities: Vec<Vulnerability>,
+    pub total_count: u64,
+    pub cache_status: String,
+}
+
+/// Service implementation for popular package vulnerability management
+pub struct PopularPackageServiceImpl<C: CacheService> {
+    vulnerability_repository: Arc<dyn VulnerabilityRepository>,
+    cache_service: Arc<C>,
+    config: Arc<crate::config::Config>,
+}
+
+impl<C: CacheService> PopularPackageServiceImpl<C> {
+    /// Create a new popular package service
+    pub fn new(
+        vulnerability_repository: Arc<dyn VulnerabilityRepository>,
+        cache_service: Arc<C>,
+        config: Arc<crate::config::Config>,
+    ) -> Self {
+        Self {
+            vulnerability_repository,
+            cache_service,
+            config,
+        }
+    }
+
+    /// Get cache key for popular packages vulnerabilities
+    fn popular_packages_cache_key(&self) -> String {
+        "popular_packages_vulnerabilities".to_string()
+    }
+
+    /// Get popular packages from configuration
+    fn get_popular_packages(&self) -> Vec<(Ecosystem, String, String)> {
+        let mut packages = Vec::new();
+
+        if let Some(ref popular_config) = self.config.popular_packages {
+            // Add NPM packages
+            if let Some(ref npm_packages) = popular_config.npm {
+                for pkg in npm_packages {
+                    packages.push((Ecosystem::Npm, pkg.name.clone(), pkg.version.clone()));
+                }
+            }
+
+            // Add PyPI packages
+            if let Some(ref pypi_packages) = popular_config.pypi {
+                for pkg in pypi_packages {
+                    packages.push((Ecosystem::PyPI, pkg.name.clone(), pkg.version.clone()));
+                }
+            }
+
+            // Add Maven packages
+            if let Some(ref maven_packages) = popular_config.maven {
+                for pkg in maven_packages {
+                    packages.push((Ecosystem::Maven, pkg.name.clone(), pkg.version.clone()));
+                }
+            }
+
+            // Add Cargo packages
+            if let Some(ref cargo_packages) = popular_config.cargo {
+                for pkg in cargo_packages {
+                    packages.push((Ecosystem::Cargo, pkg.name.clone(), pkg.version.clone()));
+                }
+            }
+
+            // Add Go packages
+            if let Some(ref go_packages) = popular_config.go {
+                for pkg in go_packages {
+                    packages.push((Ecosystem::Go, pkg.name.clone(), pkg.version.clone()));
+                }
+            }
+
+            // Add Packagist packages
+            if let Some(ref packagist_packages) = popular_config.packagist {
+                for pkg in packagist_packages {
+                    packages.push((Ecosystem::Packagist, pkg.name.clone(), pkg.version.clone()));
+                }
+            }
+        } else {
+            // Fallback to hardcoded packages if no configuration
+            packages = vec![
+                (Ecosystem::Npm, "react".to_string(), "18.0.0".to_string()),
+                (Ecosystem::Npm, "lodash".to_string(), "4.17.20".to_string()),
+                (Ecosystem::Npm, "express".to_string(), "4.17.0".to_string()),
+                (Ecosystem::PyPI, "django".to_string(), "3.0.0".to_string()),
+                (Ecosystem::PyPI, "flask".to_string(), "1.1.0".to_string()),
+                (
+                    Ecosystem::PyPI,
+                    "requests".to_string(),
+                    "2.24.0".to_string(),
+                ),
+            ];
+        }
+
+        packages
+    }
+
+    /// Get cache TTL for popular packages
+    fn get_cache_ttl(&self) -> Duration {
+        let hours = self
+            .config
+            .popular_packages
+            .as_ref()
+            .and_then(|p| p.cache_ttl_hours)
+            .unwrap_or(6); // Default to 6 hours
+
+        Duration::from_secs(hours * 60 * 60)
+    }
+
+    /// Query vulnerabilities for all popular packages
+    async fn query_popular_packages(&self) -> Result<Vec<Vulnerability>, ApplicationError> {
+        let packages = self.get_popular_packages();
+        let mut all_vulnerabilities = Vec::new();
+
+        info!(
+            "Querying vulnerabilities for {} popular packages",
+            packages.len()
+        );
+
+        for (ecosystem, name, version) in packages {
+            if let Ok(version_obj) = crate::domain::Version::parse(&version) {
+                if let Ok(package) = Package::new(name.clone(), version_obj, ecosystem) {
+                    match self
+                        .vulnerability_repository
+                        .find_vulnerabilities(&package)
+                        .await
+                    {
+                        Ok(vulns) => {
+                            debug!("Found {} vulnerabilities for {}", vulns.len(), name);
+                            all_vulnerabilities.extend(vulns);
+                        }
+                        Err(e) => {
+                            debug!("No vulnerabilities found for {}: {}", name, e);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Remove duplicates based on vulnerability ID
+        all_vulnerabilities.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
+        all_vulnerabilities.dedup_by(|a, b| a.id.as_str() == b.id.as_str());
+
+        info!(
+            "Found {} unique vulnerabilities across popular packages",
+            all_vulnerabilities.len()
+        );
+        Ok(all_vulnerabilities)
+    }
+}
+
+#[async_trait]
+impl<C: CacheService> PopularPackageService for PopularPackageServiceImpl<C> {
+    async fn list_vulnerabilities(
+        &self,
+        page: u32,
+        per_page: u32,
+        ecosystem_filter: Option<&str>,
+        severity_filter: Option<&str>,
+    ) -> Result<PopularPackageVulnerabilityResult, ApplicationError> {
+        let cache_key = self.popular_packages_cache_key();
+        let mut cache_status = "hit".to_string();
+
+        // Try to get from cache first
+        let mut vulnerabilities = if let Some(cached_vulns) = self
+            .cache_service
+            .get::<Vec<Vulnerability>>(&cache_key)
+            .await?
+        {
+            debug!("Cache hit for popular packages vulnerabilities");
+            cached_vulns
+        } else {
+            debug!("Cache miss for popular packages vulnerabilities, querying sources");
+            cache_status = "miss".to_string();
+
+            let vulns = self.query_popular_packages().await?;
+
+            // Cache the result
+            let cache_ttl = self.get_cache_ttl();
+            if let Err(e) = self.cache_service.set(&cache_key, &vulns, cache_ttl).await {
+                warn!("Failed to cache popular packages vulnerabilities: {}", e);
+            } else {
+                debug!(
+                    "Cached popular packages vulnerabilities for {:?}",
+                    cache_ttl
+                );
+            }
+
+            vulns
+        };
+
+        // Apply ecosystem filter if specified
+        if let Some(ecosystem_filter) = ecosystem_filter {
+            let filter_ecosystem = match ecosystem_filter.to_lowercase().as_str() {
+                "npm" => Some(Ecosystem::Npm),
+                "pypi" => Some(Ecosystem::PyPI),
+                "maven" => Some(Ecosystem::Maven),
+                "cargo" => Some(Ecosystem::Cargo),
+                "go" => Some(Ecosystem::Go),
+                "packagist" => Some(Ecosystem::Packagist),
+                _ => None,
+            };
+
+            if let Some(ecosystem) = filter_ecosystem {
+                vulnerabilities.retain(|v| {
+                    v.affected_packages
+                        .iter()
+                        .any(|p| p.package.ecosystem == ecosystem)
+                });
+            }
+        }
+
+        // Apply severity filter if specified
+        if let Some(severity_filter) = severity_filter {
+            let filter_severity = match severity_filter.to_lowercase().as_str() {
+                "critical" => Some(crate::domain::Severity::Critical),
+                "high" => Some(crate::domain::Severity::High),
+                "medium" => Some(crate::domain::Severity::Medium),
+                "low" => Some(crate::domain::Severity::Low),
+                _ => None,
+            };
+
+            if let Some(severity) = filter_severity {
+                vulnerabilities.retain(|v| v.severity == severity);
+            }
+        }
+
+        // Apply pagination
+        let total_count = vulnerabilities.len() as u64;
+        let start_index = ((page - 1) * per_page) as usize;
+        let end_index = (start_index + per_page as usize).min(vulnerabilities.len());
+
+        let paginated_vulnerabilities = if start_index < vulnerabilities.len() {
+            vulnerabilities[start_index..end_index].to_vec()
+        } else {
+            Vec::new()
+        };
+
+        Ok(PopularPackageVulnerabilityResult {
+            vulnerabilities: paginated_vulnerabilities,
+            total_count,
+            cache_status,
+        })
+    }
+
+    async fn refresh_cache(&self) -> Result<(), ApplicationError> {
+        info!("Refreshing popular packages vulnerability cache");
+
+        let cache_key = self.popular_packages_cache_key();
+
+        // Invalidate existing cache
+        if let Err(e) = self.cache_service.invalidate(&cache_key).await {
+            warn!("Failed to invalidate cache: {}", e);
+        }
+
+        // Query fresh data
+        let vulnerabilities = self.query_popular_packages().await?;
+
+        // Cache the new data
+        let cache_ttl = self.get_cache_ttl();
+        self.cache_service
+            .set(&cache_key, &vulnerabilities, cache_ttl)
+            .await?;
+
+        info!(
+            "Refreshed cache with {} vulnerabilities",
+            vulnerabilities.len()
+        );
+        Ok(())
+    }
+}
+
 /// Cache service implementation with advanced features
 pub struct CacheServiceImpl {
     cache_repository: Arc<FileCacheRepository>,
@@ -165,7 +453,7 @@ impl CacheServiceImpl {
     pub async fn preload_vulnerabilities(
         &self,
         packages: &[Package],
-        vulnerability_repository: &dyn VulnerabilityRepository,
+        vulnerability_repository: Arc<dyn VulnerabilityRepository>,
     ) -> Result<(), ApplicationError> {
         info!(
             "Preloading vulnerability cache for {} packages",
@@ -179,7 +467,7 @@ impl CacheServiceImpl {
             for package in chunk {
                 let package_clone = package.clone();
                 let cache_service = self.cache_repository.clone();
-                let _repo_clone = vulnerability_repository as *const dyn VulnerabilityRepository;
+                let repo_clone = vulnerability_repository.clone();
 
                 join_set.spawn(async move {
                     let cache_key = Self::package_vulnerabilities_key(&package_clone);
@@ -189,12 +477,34 @@ impl CacheServiceImpl {
                         return Ok::<_, ApplicationError>(());
                     }
 
-                    // This is unsafe but necessary for the async context
-                    // In a real implementation, we'd use Arc<dyn VulnerabilityRepository>
-                    debug!(
-                        "Would preload vulnerabilities for: {}",
-                        package_clone.identifier()
-                    );
+                    // Try to find and cache vulnerabilities for this package
+                    match repo_clone.find_vulnerabilities(&package_clone).await {
+                        Ok(vulnerabilities) => {
+                            debug!(
+                                "Preloaded {} vulnerabilities for: {}",
+                                vulnerabilities.len(),
+                                package_clone.identifier()
+                            );
+                            // Cache the vulnerabilities
+                            if let Err(e) = cache_service
+                                .set(&cache_key, &vulnerabilities, Duration::from_secs(3600))
+                                .await
+                            {
+                                warn!(
+                                    "Failed to cache vulnerabilities for {}: {}",
+                                    package_clone.identifier(),
+                                    e
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            debug!(
+                                "Failed to preload vulnerabilities for {}: {}",
+                                package_clone.identifier(),
+                                e
+                            );
+                        }
+                    }
                     Ok(())
                 });
             }
@@ -658,7 +968,8 @@ pub struct AnalysisServiceImpl<C: CacheService> {
     parser_factory: Arc<crate::infrastructure::parsers::ParserFactory>,
     vulnerability_repository: Arc<dyn VulnerabilityRepository>,
     cache_service: Arc<C>,
-    max_concurrent_requests: usize,
+    #[allow(dead_code)]
+    max_concurrent_requests: usize, // Reserved for future concurrency control
 }
 
 impl<C: CacheService> AnalysisServiceImpl<C> {
@@ -916,8 +1227,9 @@ impl<C: CacheService> AnalysisService for AnalysisServiceImpl<C> {
             .get_vulnerability_by_id(vulnerability_id)
             .await
             .map_err(ApplicationError::Vulnerability)?
-            .ok_or_else(|| ApplicationError::Configuration {
-                message: format!("Vulnerability not found: {}", vulnerability_id.as_str()),
+            .ok_or_else(|| ApplicationError::NotFound {
+                resource: "vulnerability".to_string(),
+                id: vulnerability_id.as_str().to_string(),
             })?;
 
         // Cache for 24 hours

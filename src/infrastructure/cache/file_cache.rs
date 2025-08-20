@@ -34,7 +34,8 @@ pub struct CacheStats {
 /// File-based cache repository with TTL support and concurrent access safety
 pub struct FileCacheRepository {
     cache_dir: PathBuf,
-    default_ttl: Duration,
+    #[allow(dead_code)]
+    default_ttl: Duration, // Future: configurable TTL support
     /// Mutex for file operations to prevent concurrent write conflicts
     file_locks: Arc<Mutex<std::collections::HashMap<String, Arc<Mutex<()>>>>>,
     stats: Arc<Mutex<CacheStats>>,

@@ -115,6 +115,8 @@ pub struct AppState {
     pub analysis_service: Arc<dyn crate::application::AnalysisService>,
     pub cache_service: Arc<crate::application::CacheServiceImpl>,
     pub report_service: Arc<crate::application::ReportServiceImpl>,
+    pub vulnerability_repository: Arc<dyn crate::infrastructure::VulnerabilityRepository>,
+    pub popular_package_service: Arc<dyn crate::application::PopularPackageService>,
 }
 
 /// Analyze dependencies endpoint
@@ -310,24 +312,78 @@ pub async fn get_vulnerability(
     )
 )]
 pub async fn list_vulnerabilities(
-    State(_app_state): State<AppState>,
+    State(app_state): State<AppState>,
     Query(pagination): Query<VulnerabilityListQuery>,
 ) -> Result<Json<VulnerabilityListResponse>, ApplicationError> {
-    tracing::info!("Listing vulnerabilities with pagination");
+    tracing::info!("Listing vulnerabilities with pagination and filters");
 
     // Validate pagination parameters
     let (page, per_page) = pagination.validate()?;
 
-    // For now, return an empty list since we don't have a vulnerability database yet
-    // In a real implementation, this would query the vulnerability repository
-    let vulnerabilities = Vec::new();
-    let total_count = 0u64;
-    let total_pages = ((total_count as f64) / (per_page as f64)).ceil() as u32;
+    // Validate severity filter if provided
+    if let Some(ref severity_filter) = pagination.severity {
+        match severity_filter.to_lowercase().as_str() {
+            "critical" | "high" | "medium" | "low" => {}
+            _ => {
+                return Err(ApplicationError::Domain(
+                    crate::domain::DomainError::InvalidInput {
+                        field: "severity".to_string(),
+                        message: 
+                            "Invalid severity filter. Must be one of: critical, high, medium, low"
+                                .to_string(),
+                    },
+                ));
+            }
+        }
+    }
+
+    // Use the popular package service to get vulnerabilities efficiently
+    let result = app_state
+        .popular_package_service
+        .list_vulnerabilities(
+            page,
+            per_page,
+            pagination.ecosystem.as_deref(),
+            pagination.severity.as_deref(),
+        )
+        .await?;
+
+    // Convert to DTOs
+    let vulnerabilities: Vec<VulnerabilityDto> = result
+        .vulnerabilities
+        .iter()
+        .map(|v| VulnerabilityDto {
+            id: v.id.as_str().to_string(),
+            summary: v.summary.clone(),
+            description: v.description.clone(),
+            severity: format!("{:?}", v.severity),
+            affected_packages: v
+                .affected_packages
+                .iter()
+                .map(|p| AffectedPackageDto {
+                    name: p.package.name.clone(),
+                    version: p.package.version.to_string(),
+                    ecosystem: format!("{:?}", p.package.ecosystem),
+                    vulnerable_ranges: p.vulnerable_ranges.iter().map(|r| r.to_string()).collect(),
+                    fixed_versions: p.fixed_versions.iter().map(|v| v.to_string()).collect(),
+                })
+                .collect(),
+            references: v.references.clone(),
+            published_at: v.published_at,
+            sources: v.sources.iter().map(|s| format!("{:?}", s)).collect(),
+        })
+        .collect();
+
+    let total_pages = if result.total_count == 0 {
+        1
+    } else {
+        ((result.total_count as f64) / (per_page as f64)).ceil() as u32
+    };
 
     let pagination_dto = PaginationDto {
         page,
         per_page,
-        total: total_count,
+        total: result.total_count,
         total_pages,
         has_next: page < total_pages,
         has_prev: page > 1,
@@ -339,12 +395,40 @@ pub async fn list_vulnerabilities(
     };
 
     tracing::info!(
-        "Retrieved {} vulnerabilities (page {} of {})",
+        "Retrieved {} vulnerabilities (page {} of {}, total: {}, cache: {})",
         response.vulnerabilities.len(),
         page,
-        total_pages
+        total_pages,
+        result.total_count,
+        result.cache_status
     );
 
+    Ok(Json(response))
+}
+
+/// Refresh popular packages vulnerability cache
+#[utoipa::path(
+    post,
+    path = "/api/v1/vulnerabilities/refresh-cache",
+    tag = "vulnerabilities",
+    responses(
+        (status = 200, description = "Cache refreshed successfully"),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
+pub async fn refresh_vulnerability_cache(
+    State(app_state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApplicationError> {
+    tracing::info!("Refreshing popular packages vulnerability cache");
+
+    app_state.popular_package_service.refresh_cache().await?;
+
+    let response = serde_json::json!({
+        "message": "Popular packages vulnerability cache refreshed successfully",
+        "timestamp": chrono::Utc::now().to_rfc3339()
+    });
+
+    tracing::info!("Cache refresh completed successfully");
     Ok(Json(response))
 }
 
@@ -374,8 +458,7 @@ pub async fn get_analysis_report(
     // Validate pagination parameters
     let (page, per_page) = pagination.validate()?;
 
-    // For now, we'll return a placeholder response since we don't have persistent storage yet
-    // In a real implementation, this would fetch from a database or cache
+    // Retrieve analysis report from the file cache system
     let cache_key = format!("analysis_report:{}", id);
 
     // Try to get cached analysis report

@@ -79,7 +79,8 @@ struct NvdSearchResponse {
     #[serde(rename = "vulnerabilities")]
     vulnerabilities: Vec<NvdVulnerabilityWrapper>,
     #[serde(rename = "totalResults")]
-    total_results: u32,
+    #[allow(dead_code)]
+    total_results: u32, // Future: pagination support
 }
 
 #[derive(Debug, Deserialize)]
@@ -91,12 +92,15 @@ struct NvdVulnerabilityWrapper {
 struct NvdCve {
     id: String,
     #[serde(rename = "sourceIdentifier")]
-    source_identifier: Option<String>,
+    #[allow(dead_code)]
+    source_identifier: Option<String>, // Future: source tracking
     published: Option<String>,
     #[serde(rename = "lastModified")]
-    last_modified: Option<String>,
+    #[allow(dead_code)]
+    last_modified: Option<String>, // Future: update tracking
     #[serde(rename = "vulnStatus")]
-    vuln_status: Option<String>,
+    #[allow(dead_code)]
+    vuln_status: Option<String>, // Future: status filtering
     descriptions: Option<Vec<NvdDescription>>,
     metrics: Option<NvdMetrics>,
     references: Option<Vec<NvdReference>>,
@@ -120,34 +124,41 @@ struct NvdMetrics {
 
 #[derive(Debug, Deserialize)]
 struct NvdCvssMetric {
-    source: String,
+    #[allow(dead_code)]
+    source: String, // Future: CVSS source tracking
     #[serde(rename = "type")]
-    metric_type: String,
+    #[allow(dead_code)]
+    metric_type: String, // Future: metric type categorization
     #[serde(rename = "cvssData")]
     cvss_data: NvdCvssData,
 }
 
 #[derive(Debug, Deserialize)]
 struct NvdCvssMetricV2 {
-    source: String,
+    #[allow(dead_code)]
+    source: String, // Future: CVSS source tracking
     #[serde(rename = "type")]
-    metric_type: String,
+    #[allow(dead_code)]
+    metric_type: String, // Future: metric type categorization
     #[serde(rename = "cvssData")]
     cvss_data: NvdCvssDataV2,
 }
 
 #[derive(Debug, Deserialize)]
 struct NvdCvssData {
-    version: String,
+    #[allow(dead_code)]
+    version: String, // Future: CVSS version handling
     #[serde(rename = "baseScore")]
     base_score: f64,
     #[serde(rename = "baseSeverity")]
-    base_severity: String,
+    #[allow(dead_code)]
+    base_severity: String, // Future: severity classification
 }
 
 #[derive(Debug, Deserialize)]
 struct NvdCvssDataV2 {
-    version: String,
+    #[allow(dead_code)]
+    version: String, // Future: CVSS version handling
     #[serde(rename = "baseScore")]
     base_score: f64,
 }
@@ -155,7 +166,8 @@ struct NvdCvssDataV2 {
 #[derive(Debug, Deserialize)]
 struct NvdReference {
     url: String,
-    source: Option<String>,
+    #[allow(dead_code)]
+    source: Option<String>, // Future: reference source tracking
 }
 
 /// Client for the NVD (National Vulnerability Database) API
@@ -381,6 +393,7 @@ impl NvdClient {
             severity,
             references,
             published_at,
+            affected: vec![], // TODO: Extract affected packages from NVD data
         }
     }
 }
@@ -438,7 +451,7 @@ impl VulnerabilityApiClient for NvdClient {
 mod tests {
     use super::*;
     use crate::domain::{Ecosystem, Version};
-    use mockito::{Matcher, Server};
+    use mockito::Server;
     use serde_json::json;
 
     fn create_test_package() -> Package {

@@ -5,9 +5,13 @@ use tokio::{net::TcpListener, signal};
 
 use vulnera_rust::{
     Config,
-    application::{AnalysisServiceImpl, CacheServiceImpl, ReportServiceImpl},
+    application::{
+        AnalysisServiceImpl, CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl,
+    },
     infrastructure::{
-        cache::file_cache::FileCacheRepository, parsers::ParserFactory,
+        api_clients::{ghsa::GhsaClient, nvd::NvdClient, osv::OsvClient},
+        cache::file_cache::FileCacheRepository,
+        parsers::ParserFactory,
         repositories::AggregatingVulnerabilityRepository,
     },
     init_tracing,
@@ -39,29 +43,63 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     let cache_service = Arc::new(CacheServiceImpl::new(cache_repository));
     let parser_factory = Arc::new(ParserFactory::new());
-    let vulnerability_repository = Arc::new(AggregatingVulnerabilityRepository::new());
+
+    // Create API clients
+    let osv_client = Arc::new(OsvClient::new("https://api.osv.dev".to_string()));
+    let nvd_client = Arc::new(NvdClient::new(
+        "https://services.nvd.nist.gov/rest/json".to_string(),
+        None, // No API key by default
+    ));
+    let ghsa_client = Arc::new(GhsaClient::new(
+        config.apis.ghsa.token.clone().unwrap_or_else(|| {
+            tracing::warn!("No GitHub token configured, GHSA API may have limited functionality");
+            String::new()
+        }),
+        config.apis.ghsa.graphql_url.clone(),
+    ));
+
+    let vulnerability_repository = Arc::new(AggregatingVulnerabilityRepository::new(
+        osv_client,
+        nvd_client,
+        ghsa_client,
+    ));
+
     let analysis_service = Arc::new(AnalysisServiceImpl::new(
         parser_factory,
-        vulnerability_repository,
+        vulnerability_repository.clone(),
         cache_service.clone(),
     ));
     let report_service = Arc::new(ReportServiceImpl::new());
+
+    // Create popular package service with config
+    let config_arc = Arc::new(config.clone());
+    let popular_package_service = Arc::new(PopularPackageServiceImpl::new(
+        vulnerability_repository.clone(),
+        cache_service.clone(),
+        config_arc,
+    ));
 
     // Create application state
     let app_state = AppState {
         analysis_service,
         cache_service,
         report_service,
+        vulnerability_repository,
+        popular_package_service,
     };
 
     // Create router
-    let app = create_router(app_state);
+    let app = create_router(app_state, &config);
 
     // Create server address
     let addr = SocketAddr::new(config.server.host.parse()?, config.server.port);
 
     tracing::info!("Server listening on {}", addr);
-    tracing::info!("API documentation available at http://{}/docs", addr);
+    if config.server.enable_docs {
+        tracing::info!("API documentation available at http://{}/docs", addr);
+    } else {
+        tracing::info!("API documentation disabled (enable_docs=false)");
+    }
 
     // Start server with graceful shutdown
     let listener = TcpListener::bind(addr).await?;

@@ -51,15 +51,16 @@ uuid = { version = "1.18.0", features = ["v4", "serde"] }
 # Hashing for cache keys
 sha2 = "0.10.8"
 hex = "0.4.3"
-# File parsing
+# File and Version parsing
 toml = "0.9.5"
-serde_yaml = "0.9.34"
+serde_yaml = "0.9.34-deprecated"
 regex = "1.11.1"
+semver = { version = "1.0", features = ["serde"] }
 
 [dev-dependencies]
 tokio-test = "0.4.4"
 mockito = "1.7.0"
-tempfile = "3.20"
+tempfile = "3.21"
 axum-test = "17.3.0"
 
 [build-dependencies]

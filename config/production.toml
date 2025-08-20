@@ -1,0 +1,31 @@
+[server]
+host = "0.0.0.0"
+port = 3000
+workers = 0
+enable_docs = false
+request_timeout_seconds = 30
+allowed_origins = [
+    "${ALLOWED_ORIGIN}",
+]
+
+[cache]
+ttl_hours = 24
+
+[apis.osv]
+base_url = "https://api.osv.dev/v1"
+timeout_seconds = 15
+
+[apis.nvd]
+base_url = "https://services.nvd.nist.gov/rest/json"
+api_key = "${NVD_API_KEY}"
+timeout_seconds = 20
+rate_limit_per_30s = 100
+
+[apis.ghsa]
+graphql_url = "https://api.github.com/graphql"
+token = "${GH_TOKEN}"
+timeout_seconds = 20
+
+[logging]
+level = "warn"
+format = "json"

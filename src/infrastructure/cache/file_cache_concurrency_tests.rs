@@ -2,10 +2,10 @@
 
 #[cfg(test)]
 mod tests {
-    use super::super::file_cache::{CacheStats, FileCacheRepository};
+    use super::super::file_cache::FileCacheRepository;
     use crate::application::CacheService;
     use serde::{Deserialize, Serialize};
-    use std::path::PathBuf;
+    
     use std::sync::Arc;
     use std::time::Duration;
     use tempfile::TempDir;

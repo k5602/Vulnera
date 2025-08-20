@@ -13,6 +13,40 @@ pub struct RawVulnerability {
     pub severity: Option<String>,
     pub references: Vec<String>,
     pub published_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub affected: Vec<AffectedPackageData>,
+}
+
+/// Raw affected package data from external APIs
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AffectedPackageData {
+    pub package: PackageInfo,
+    pub ranges: Option<Vec<VersionRangeData>>,
+    pub versions: Option<Vec<String>>,
+}
+
+/// Package information from external APIs
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PackageInfo {
+    pub name: String,
+    pub ecosystem: String,
+    pub purl: Option<String>,
+}
+
+/// Version range data from external APIs
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VersionRangeData {
+    #[serde(rename = "type")]
+    pub range_type: String,
+    pub repo: Option<String>,
+    pub events: Vec<VersionEventData>,
+}
+
+/// Version event data from external APIs
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VersionEventData {
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub value: String,
 }
 
 /// Trait for vulnerability API clients
