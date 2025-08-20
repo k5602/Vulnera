@@ -1,0 +1,27 @@
+name: Build and Push to ACR
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Azure ACR login
+        run: az acr login --name ECRvubnera
+
+      - name: Build and Push Docker image
+        run: |
+          docker build -t ECRvubnera.azurecr.io/vulnera-rust:latest .
+          docker push ECRvubnera.azurecr.io/vulnera-rust:latest
