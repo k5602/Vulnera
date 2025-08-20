@@ -11,3 +11,6 @@ pub use controllers::*;
 pub use middleware::*;
 pub use models::*;
 pub use routes::*;
+
+#[cfg(test)]
+mod tests;

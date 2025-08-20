@@ -15,12 +15,100 @@ timeout_seconds = 30
 [apis.nvd]
 base_url = "https://services.nvd.nist.gov/rest/json"
 timeout_seconds = 30
-rate_limit_per_30s = 5  # Without API key, 50 with API key
+rate_limit_per_30s = 5                               # Without API key, 50 with API key
 
 [apis.ghsa]
 graphql_url = "https://api.github.com/graphql"
 timeout_seconds = 30
+# token = "your_github_token_here"  # Set via environment variable VULNERA__APIS__GHSA__TOKEN
 
 [logging]
 level = "info"
 format = "json"
+
+# Popular packages configuration for vulnerability listing
+[popular_packages]
+# Cache TTL for popular package vulnerability listings (in hours)
+cache_ttl_hours = 6
+
+# NPM packages
+[[popular_packages.npm]]
+name = "react"
+version = "18.0.0"
+
+[[popular_packages.npm]]
+name = "lodash"
+version = "4.17.20"
+
+[[popular_packages.npm]]
+name = "express"
+version = "4.17.0"
+
+[[popular_packages.npm]]
+name = "axios"
+version = "0.21.0"
+
+[[popular_packages.npm]]
+name = "moment"
+version = "2.24.0"
+
+# Python packages
+[[popular_packages.pypi]]
+name = "django"
+version = "3.0.0"
+
+[[popular_packages.pypi]]
+name = "flask"
+version = "1.1.0"
+
+[[popular_packages.pypi]]
+name = "requests"
+version = "2.24.0"
+
+[[popular_packages.pypi]]
+name = "numpy"
+version = "1.19.0"
+
+[[popular_packages.pypi]]
+name = "pillow"
+version = "8.0.0"
+
+# Maven packages
+[[popular_packages.maven]]
+name = "org.springframework:spring-core"
+version = "5.2.0"
+
+[[popular_packages.maven]]
+name = "com.fasterxml.jackson.core:jackson-core"
+version = "2.10.0"
+
+[[popular_packages.maven]]
+name = "org.apache.commons:commons-lang3"
+version = "3.10"
+
+# Go packages
+[[popular_packages.go]]
+name = "github.com/gin-gonic/gin"
+version = "1.6.0"
+
+[[popular_packages.go]]
+name = "github.com/gorilla/mux"
+version = "1.7.0"
+
+# Rust packages
+[[popular_packages.cargo]]
+name = "serde"
+version = "1.0.100"
+
+[[popular_packages.cargo]]
+name = "tokio"
+version = "1.0.0"
+
+# PHP packages
+[[popular_packages.packagist]]
+name = "symfony/console"
+version = "5.0.0"
+
+[[popular_packages.packagist]]
+name = "guzzlehttp/guzzle"
+version = "7.0.0"

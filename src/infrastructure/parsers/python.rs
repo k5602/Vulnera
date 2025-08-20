@@ -179,8 +179,17 @@ impl PipfileParser {
     fn clean_pipfile_version(&self, version_str: &str) -> Result<String, ParseError> {
         let version_str = version_str.trim();
 
-        if version_str.is_empty() || version_str == "*" {
+        if version_str.is_empty() || version_str == "*" || version_str == "latest" {
             return Ok("0.0.0".to_string());
+        }
+
+        // Handle complex ranges like ">=2.25.1,<3.0.0"
+        if version_str.contains(',') {
+            // Extract the first version from a range
+            let parts: Vec<&str> = version_str.split(',').collect();
+            if let Some(first_part) = parts.first() {
+                return self.clean_pipfile_version(first_part);
+            }
         }
 
         // Remove common prefixes

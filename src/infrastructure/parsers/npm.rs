@@ -59,6 +59,11 @@ impl NpmParser {
             });
         }
 
+        // Handle special cases
+        if version_str == "*" || version_str == "latest" {
+            return Ok("0.0.0".to_string());
+        }
+
         // Remove common prefixes
         let cleaned = if version_str.starts_with('^') || version_str.starts_with('~') {
             &version_str[1..]
