@@ -24,12 +24,6 @@ A comprehensive, high-performance vulnerability analysis API built with Rust, de
 - **Storage**: ~100MB for application + cache storage
 
 
-# 🌐 Vulnera Rust - AWS Architecture Overview
-
-![Architecture Diagram](./AWS2.png)
-
----
-
 ## 🚀 Executive Summary
 
 # 🌐 Vulnera Rust - Azure Architecture Overview
