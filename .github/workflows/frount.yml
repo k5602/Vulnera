@@ -1,32 +1,43 @@
+# اسم الـ Workflow الذي سيظهر في صفحة Actions في GitHub
 name: Deploy Frontend to Azure Storage
 
+# متى يتم تشغيل هذا الـ Workflow
 on:
+  # يتم التشغيل عند أي عملية push على فرع main
   push:
     branches:
-      - main  # تأكد أن هذا هو اسم الفرع الصحيح
+      - main
 
+# المهام التي سيتم تنفيذها
 jobs:
   build-and-deploy:
+    # نوع النظام الذي ستعمل عليه المهمة
     runs-on: ubuntu-latest
 
+    # الخطوات التي سيتم تنفيذها بالترتيب
     steps:
+      # 1. سحب الكود من الـ repository
       - name: Checkout repo
         uses: actions/checkout@v3
 
+      # 2. إعداد بيئة عمل Node.js
       - name: Setup Node
         uses: actions/setup-node@v3
         with:
           node-version: '18'
 
+      # 3. تثبيت الاعتماديات (dependencies) الخاصة بالمشروع
       - name: Install dependencies
-        working-directory: ./frontend  # تأكد أن هذا هو مسار مجلد الواجهة الأمامية
+        # تحديد المجلد الذي يحتوي على الواجهة الأمامية
+        working-directory: ./frontend
         run: npm install
 
+      # 4. بناء المشروع وتحويله إلى ملفات static
       - name: Build project
         working-directory: ./frontend
         run: npm run build
+        # هنا يتم حقن متغيرات البيئة أثناء عملية البناء
         env:
-          # 👇 أضف كل متغيرات البيئة هنا 👇
           VITE_API_BASE_URL: https://vulnera-back.politeisland-d68133bc.switzerlandnorth.azurecontainerapps.io
           VITE_API_VERSION: v1
           VITE_API_TIMEOUT: 45000
@@ -35,6 +46,7 @@ jobs:
           VITE_ENVIRONMENT: production
           VITE_ENABLE_DEBUG: false
 
+      # 5. رفع الملفات الناتجة إلى Azure Storage Account
       - name: Upload to Azure Storage
         uses: azure/CLI@v1
         with:
@@ -46,4 +58,5 @@ jobs:
               -d '$web' \
               --overwrite true
         env:
+          # هذا المتغير يجب أن يكون مُعرفًا في GitHub Secrets
           AZURE_STORAGE_KEY: ${{ secrets.AZURE_STORAGE_KEY }}
