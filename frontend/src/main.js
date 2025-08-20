@@ -1,11 +1,40 @@
 import "./style.css";
 import { generateHTMLReport } from "./html-report-generator.js";
 
-// API base URL (configurable via Vite environment or global window variable)
-const API_BASE_URL =
-  (import.meta.env && import.meta.env.VITE_API_BASE_URL) ||
-  (typeof window !== "undefined" && window.VULNERA_API_BASE_URL) ||
-  "http://localhost:3000"; // Fallback to local development server
+// Configuration from environment variables
+const CONFIG = {
+  API_BASE_URL: 
+    (import.meta.env && import.meta.env.VITE_API_BASE_URL) ||
+    (typeof window !== "undefined" && window.VULNERA_API_BASE_URL) ||
+    "http://localhost:3000", // Fallback to local development server
+  
+  API_VERSION: 
+    (import.meta.env && import.meta.env.VITE_API_VERSION) || 
+    "v1",
+  
+  APP_NAME: 
+    (import.meta.env && import.meta.env.VITE_APP_NAME) || 
+    "Vulnera",
+    
+  APP_VERSION: 
+    (import.meta.env && import.meta.env.VITE_APP_VERSION) || 
+    "1.0.0"
+};
+
+// Build complete API URL
+const API_BASE_URL = CONFIG.API_BASE_URL;
+const API_ENDPOINT = `${API_BASE_URL}/api/${CONFIG.API_VERSION}`;
+
+// Log configuration for debugging (only in development)
+if (import.meta.env.DEV) {
+  console.log("🔧 App Configuration:", {
+    API_BASE_URL,
+    API_ENDPOINT,
+    APP_NAME: CONFIG.APP_NAME,
+    APP_VERSION: CONFIG.APP_VERSION,
+    MODE: import.meta.env.MODE
+  });
+}
 
 // Theme switching functionality
 function initThemeToggle() {
@@ -166,10 +195,10 @@ function initDragAndDrop() {
 
     try {
       const file_content = await file.text();
-      console.log("🔍 API Request to:", `${API_BASE_URL}/api/v1/analyze`);
+      console.log("🔍 API Request to:", `${API_ENDPOINT}/analyze`);
       console.log("📤 Request data:", { ecosystem, filename: file.name });
 
-      const res = await fetch(`${API_BASE_URL}/api/v1/analyze`, {
+      const res = await fetch(`${API_ENDPOINT}/analyze`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -505,7 +534,7 @@ document.addEventListener("DOMContentLoaded", function () {
                   <p class="text-lg sm:text-xl font-semibold">Drop your dependency file here</p>
                   <p class="opacity-60 text-sm sm:text-base">or click to browse files</p>
                 </div>
-                <div class="badge badge-outline text-xs sm:text-sm">
+                <div class="badge badge-outline badge-lg text-xs sm:text-sm px-4 py-5 border-2">
                   <span class="hidden sm:inline">Supported files: package.json, requirements.txt, Cargo.toml, and more</span>
                   <span class="sm:hidden">Supports: package.json, requirements.txt, etc.</span>
                 </div>
@@ -689,10 +718,10 @@ document.addEventListener("DOMContentLoaded", function () {
         </div>
       </div>
       <div class="text-center">
-        <p class="text-sm sm:text-base">© 2024 Vulnera - Built with <i class="fas fa-heart text-red-500"></i> and by ID-Brains</p>
+        <p class="text-sm sm:text-base">© 2025 Vulnera - Built with ID-Brains</p>
         <p class="text-xs sm:text-sm opacity-70 px-4">
           <span class="hidden sm:inline">Compatible with Python, Node.js, Java, Rust, Go, PHP, Ruby & .NET ecosystems</span>
-          <span class="sm:hidden">Multi-language vulnerability analysis</span>
+          <span class="sm:hidden">vulnerability toolkit</span>
         </p>
       </div>
     </footer>
@@ -918,7 +947,7 @@ function initGitHubScanning() {
       notyf.open({
         type: "success",
         message:
-          "📅 Expected Release: Q1 2025 | Follow our GitHub for beta access and updates!",
+          "📅 Expected Release: Q1 2026 | Follow our GitHub for beta access and updates!",
       });
     }, 5000);
   }
