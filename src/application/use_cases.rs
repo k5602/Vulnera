@@ -1,58 +1,130 @@
 //! Use cases representing application workflows
 
+use std::sync::Arc;
+use tracing::{debug, info};
+
 use super::errors::ApplicationError;
-use crate::domain::{AnalysisReport, Ecosystem, VulnerabilityId};
+use super::services::{AnalysisService, ReportService};
+use crate::domain::{AnalysisReport, Ecosystem, Vulnerability, VulnerabilityId};
 
 /// Use case for analyzing dependencies in a file
-pub struct AnalyzeDependencies;
+pub struct AnalyzeDependencies {
+    analysis_service: Arc<dyn AnalysisService>,
+}
 
 impl AnalyzeDependencies {
-    pub fn new() -> Self {
-        Self
+    /// Create a new analyze dependencies use case
+    pub fn new(analysis_service: Arc<dyn AnalysisService>) -> Self {
+        Self { analysis_service }
     }
 
+    /// Execute the dependency analysis workflow
+    #[tracing::instrument(skip(self, file_content))]
     pub async fn execute(
         &self,
-        _file_content: &str,
-        _ecosystem: Ecosystem,
+        file_content: &str,
+        ecosystem: Ecosystem,
     ) -> Result<AnalysisReport, ApplicationError> {
-        // Implementation will be added in later tasks
-        todo!("Implement dependency analysis workflow")
+        info!(
+            "Executing dependency analysis use case for ecosystem: {:?}",
+            ecosystem
+        );
+
+        let analysis_result = self
+            .analysis_service
+            .analyze_dependencies(file_content, ecosystem)
+            .await?;
+
+        info!(
+            "Dependency analysis completed - {} packages, {} vulnerabilities",
+            analysis_result.metadata.total_packages, analysis_result.metadata.total_vulnerabilities
+        );
+
+        Ok(analysis_result)
     }
 }
 
 /// Use case for retrieving vulnerability details
-pub struct GetVulnerabilityDetails;
+pub struct GetVulnerabilityDetails {
+    analysis_service: Arc<dyn AnalysisService>,
+}
 
 impl GetVulnerabilityDetails {
-    pub fn new() -> Self {
-        Self
+    /// Create a new get vulnerability details use case
+    pub fn new(analysis_service: Arc<dyn AnalysisService>) -> Self {
+        Self { analysis_service }
     }
 
+    /// Execute the vulnerability details retrieval workflow
+    #[tracing::instrument(skip(self))]
     pub async fn execute(
         &self,
-        _vulnerability_id: &VulnerabilityId,
-    ) -> Result<crate::domain::Vulnerability, ApplicationError> {
-        // Implementation will be added in later tasks
-        todo!("Implement vulnerability details retrieval")
+        vulnerability_id: &VulnerabilityId,
+    ) -> Result<Vulnerability, ApplicationError> {
+        info!(
+            "Executing vulnerability details retrieval for ID: {}",
+            vulnerability_id.as_str()
+        );
+
+        let vulnerability = self
+            .analysis_service
+            .get_vulnerability_details(vulnerability_id)
+            .await?;
+
+        debug!(
+            "Retrieved vulnerability details for {}: {} ({})",
+            vulnerability_id.as_str(),
+            vulnerability.summary,
+            vulnerability.severity
+        );
+
+        Ok(vulnerability)
     }
 }
 
 /// Use case for generating analysis reports
-pub struct GenerateReport;
+pub struct GenerateReport {
+    report_service: Arc<dyn ReportService>,
+}
 
 impl GenerateReport {
-    pub fn new() -> Self {
-        Self
+    /// Create a new generate report use case
+    pub fn new(report_service: Arc<dyn ReportService>) -> Self {
+        Self { report_service }
     }
 
+    /// Execute the report generation workflow
+    #[tracing::instrument(skip(self, analysis))]
     pub async fn execute(
         &self,
-        _analysis: &AnalysisReport,
-        _format: ReportFormat,
+        analysis: &AnalysisReport,
+        format: ReportFormat,
     ) -> Result<String, ApplicationError> {
-        // Implementation will be added in later tasks
-        todo!("Implement report generation")
+        info!(
+            "Executing report generation for analysis {} in format: {:?}",
+            analysis.id, format
+        );
+
+        let report = match format {
+            ReportFormat::Text => {
+                debug!("Generating text format report");
+                self.report_service.generate_report(analysis).await?
+            }
+            ReportFormat::Html | ReportFormat::Json => {
+                debug!("Generating JSON format report");
+                // Note: generate_html_report actually generates JSON format
+                // as per the implementation in ReportServiceImpl
+                self.report_service.generate_html_report(analysis).await?
+            }
+        };
+
+        info!(
+            "Report generation completed - {} characters in {:?} format",
+            report.len(),
+            format
+        );
+
+        Ok(report)
     }
 }
 
