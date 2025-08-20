@@ -1,0 +1,41 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Build Rust project
+        run: cargo build --release
+
+      - name: Azure Container Registry Login
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ env.AZURE_ACR_LOGIN_SERVER }}
+          username: ${{ secrets.AZURE_ACR_USERNAME }}
+          password: ${{ secrets.AZURE_ACR_PASSWORD }}
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ecrvubnera.azurecr.io/vulnera-app:latest \
+            -t ecrvubnera.azurecr.io/vulnera-app:${{ github.sha }} .
+
+      - name: Push Docker image
+        run: |
+          docker push ecrvubnera.azurecr.io/vulnera-app:latest
+          docker push ecrvubnera.azurecr.io/vulnera-app:${{ github.sha }}
