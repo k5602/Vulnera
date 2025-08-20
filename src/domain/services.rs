@@ -1,6 +1,6 @@
 //! Domain services containing business logic
 
-use super::{Package, Version, VersionRange, Vulnerability, VulnerabilityId, VulnerabilitySource};
+use super::{Package, Version, VersionRange, Vulnerability, VulnerabilitySource};
 use std::collections::HashMap;
 
 /// Service for matching packages against vulnerabilities

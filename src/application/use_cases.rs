@@ -13,8 +13,8 @@ impl AnalyzeDependencies {
 
     pub async fn execute(
         &self,
-        file_content: &str,
-        ecosystem: Ecosystem,
+        _file_content: &str,
+        _ecosystem: Ecosystem,
     ) -> Result<AnalysisReport, ApplicationError> {
         // Implementation will be added in later tasks
         todo!("Implement dependency analysis workflow")
@@ -31,7 +31,7 @@ impl GetVulnerabilityDetails {
 
     pub async fn execute(
         &self,
-        vulnerability_id: &VulnerabilityId,
+        _vulnerability_id: &VulnerabilityId,
     ) -> Result<crate::domain::Vulnerability, ApplicationError> {
         // Implementation will be added in later tasks
         todo!("Implement vulnerability details retrieval")
@@ -48,8 +48,8 @@ impl GenerateReport {
 
     pub async fn execute(
         &self,
-        analysis: &AnalysisReport,
-        format: ReportFormat,
+        _analysis: &AnalysisReport,
+        _format: ReportFormat,
     ) -> Result<String, ApplicationError> {
         // Implementation will be added in later tasks
         todo!("Implement report generation")

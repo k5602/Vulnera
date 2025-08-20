@@ -26,13 +26,16 @@ struct GraphQLResponse<T> {
 struct GraphQLError {
     message: String,
     #[serde(default)]
-    locations: Vec<GraphQLLocation>,
+    #[allow(dead_code)]
+    locations: Vec<GraphQLLocation>, // GraphQL error location info
 }
 
 #[derive(Debug, Deserialize)]
 struct GraphQLLocation {
-    line: u32,
-    column: u32,
+    #[allow(dead_code)]
+    line: u32,     // Line number in GraphQL query
+    #[allow(dead_code)]
+    column: u32,   // Column number in GraphQL query
 }
 
 /// Security advisories query response
@@ -43,7 +46,7 @@ struct SecurityAdvisoriesResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct SecurityAdvisoriesConnection {
+pub struct SecurityAdvisoriesConnection {
     nodes: Vec<SecurityAdvisory>,
     #[serde(rename = "pageInfo")]
     page_info: PageInfo,
@@ -67,7 +70,8 @@ struct SecurityAdvisory {
     #[serde(rename = "publishedAt")]
     published_at: String,
     references: Vec<Reference>,
-    vulnerabilities: SecurityAdvisoryVulnerabilities,
+    #[allow(dead_code)]
+    vulnerabilities: SecurityAdvisoryVulnerabilities, // Future: detailed vulnerability info
 }
 
 #[derive(Debug, Deserialize)]
@@ -77,27 +81,34 @@ struct Reference {
 
 #[derive(Debug, Deserialize)]
 struct SecurityAdvisoryVulnerabilities {
-    nodes: Vec<Vulnerability>,
+    #[allow(dead_code)]
+    nodes: Vec<Vulnerability>, // Future: vulnerability nodes processing
 }
 
 #[derive(Debug, Deserialize)]
 struct Vulnerability {
-    package: VulnerabilityPackage,
+    #[allow(dead_code)]
+    package: VulnerabilityPackage, // Future: package-specific vulnerability details
     #[serde(rename = "vulnerableVersionRange")]
-    vulnerable_version_range: Option<String>,
+    #[allow(dead_code)]
+    vulnerable_version_range: Option<String>, // Future: version range analysis
     #[serde(rename = "firstPatchedVersion")]
-    first_patched_version: Option<FirstPatchedVersion>,
+    #[allow(dead_code)]
+    first_patched_version: Option<FirstPatchedVersion>, // Future: patch version tracking
 }
 
 #[derive(Debug, Deserialize)]
 struct VulnerabilityPackage {
-    name: String,
-    ecosystem: String,
+    #[allow(dead_code)]
+    name: String,      // Future: package name processing
+    #[allow(dead_code)]
+    ecosystem: String, // Future: ecosystem-specific logic
 }
 
 #[derive(Debug, Deserialize)]
 struct FirstPatchedVersion {
-    identifier: String,
+    #[allow(dead_code)]
+    identifier: String, // Future: patch version identifier processing
 }
 
 /// Client for GitHub Security Advisories GraphQL API

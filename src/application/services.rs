@@ -658,7 +658,8 @@ pub struct AnalysisServiceImpl<C: CacheService> {
     parser_factory: Arc<crate::infrastructure::parsers::ParserFactory>,
     vulnerability_repository: Arc<dyn VulnerabilityRepository>,
     cache_service: Arc<C>,
-    max_concurrent_requests: usize,
+    #[allow(dead_code)]
+    max_concurrent_requests: usize, // Reserved for future concurrency control
 }
 
 impl<C: CacheService> AnalysisServiceImpl<C> {

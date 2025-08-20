@@ -349,7 +349,10 @@ async fn test_maven_parser_comprehensive() {
     let packages = parser.parse_file(POM_XML_CONTENT).await.unwrap();
     assert_eq!(packages.len(), 3);
 
-    let spring = packages.iter().find(|p| p.name == "org.springframework:spring-core").unwrap();
+    let spring = packages
+        .iter()
+        .find(|p| p.name == "org.springframework:spring-core")
+        .unwrap();
     assert_eq!(spring.version, Version::parse("5.3.8").unwrap());
     assert_eq!(spring.ecosystem, Ecosystem::Maven);
 }
@@ -364,7 +367,10 @@ async fn test_gradle_parser_comprehensive() {
     let packages = parser.parse_file(BUILD_GRADLE_CONTENT).await.unwrap();
     assert!(packages.len() >= 3);
 
-    let spring = packages.iter().find(|p| p.name == "org.springframework:spring-core").unwrap();
+    let spring = packages
+        .iter()
+        .find(|p| p.name == "org.springframework:spring-core")
+        .unwrap();
     assert_eq!(spring.version, Version::parse("5.3.8").unwrap());
 }
 
@@ -603,7 +609,7 @@ async fn test_parser_performance_concurrent_parsing() {
     use std::time::Instant;
     use tokio::task::JoinSet;
 
-    let parser = npm::NpmParser::new();
+    let _parser = npm::NpmParser::new();
     let mut join_set = JoinSet::new();
 
     let start = Instant::now();
