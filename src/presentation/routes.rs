@@ -23,7 +23,7 @@ use crate::presentation::{
         },
         health::{detailed_health_check, health_check, liveness_probe, metrics, readiness_probe},
     },
-    middleware::logging_middleware,
+    middleware::{logging_middleware, security_headers_middleware, https_enforcement_middleware},
     models::*,
 };
 use axum::{
@@ -153,23 +153,33 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
             router.merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi()));
     }
 
+    let service_builder = ServiceBuilder::new()
+        // HTTP tracing
+        .layer(TraceLayer::new_for_http())
+        // CORS handling
+        .layer(cors_layer)
+        // Request timeout (30 seconds)
+        .layer(TimeoutLayer::new(Duration::from_secs(
+            config.server.request_timeout_seconds,
+        )))
+        // Custom logging middleware
+        .layer(middleware::from_fn(logging_middleware));
+
+    // Conditionally add security headers middleware
+    if config.server.security.enable_security_headers {
+        router = router.layer(middleware::from_fn(security_headers_middleware));
+    }
+
+    // Conditionally add HTTPS enforcement middleware  
+    if config.server.security.enforce_https {
+        router = router.layer(middleware::from_fn(https_enforcement_middleware));
+    }
+
     router
         // Serve documentation resources
         .route("/docs/examples", get(serve_api_examples))
         .route("/docs/versioning", get(serve_versioning_info))
-        .layer(
-            ServiceBuilder::new()
-                // HTTP tracing
-                .layer(TraceLayer::new_for_http())
-                // CORS handling
-                .layer(cors_layer)
-                // Request timeout (30 seconds)
-                .layer(TimeoutLayer::new(Duration::from_secs(
-                    config.server.request_timeout_seconds,
-                )))
-                // Custom logging middleware
-                .layer(middleware::from_fn(logging_middleware)),
-        )
+        .layer(service_builder)
         .with_state(app_state)
 }
 

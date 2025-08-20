@@ -3,6 +3,17 @@
 [server]
 host = "0.0.0.0"
 port = 3000
+workers = 4
+enable_docs = true
+request_timeout_seconds = 30
+allowed_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+[server.security]
+enforce_https = false
+enable_security_headers = false
+sanitize_errors = false
+hsts_max_age = 31536000  # 1 year in seconds
+hsts_include_subdomains = true
 
 [cache]
 directory = ".vulnera_cache"

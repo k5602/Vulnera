@@ -80,14 +80,14 @@ docker build -t vulnera-rust .
 docker run -p 3000:3000 vulnera-rust
 
 # Or use docker-compose
-docker-compose up
+cd scripts/docker && docker-compose up
 ```
 
 ### Development Setup
 
 ```bash
 # Install development dependencies
-make install-deps
+make -C scripts/build_workflow install-deps
 
 # Setup pre-commit hooks
 pre-commit install

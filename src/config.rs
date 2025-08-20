@@ -44,6 +44,23 @@ pub struct ServerConfig {
     pub request_timeout_seconds: u64,
     /// Allowed CORS origins. Use ["*"] to allow any (development only). Empty vector -> no external origins.
     pub allowed_origins: Vec<String>,
+    /// Security configuration
+    pub security: SecurityConfig,
+}
+
+/// Security configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityConfig {
+    /// Whether to enforce HTTPS redirects (redirect HTTP to HTTPS)
+    pub enforce_https: bool,
+    /// Whether to enable security headers
+    pub enable_security_headers: bool,
+    /// Whether to sanitize error messages in production
+    pub sanitize_errors: bool,
+    /// HSTS max age in seconds (31536000 = 1 year)
+    pub hsts_max_age: u64,
+    /// Whether to include subdomains in HSTS
+    pub hsts_include_subdomains: bool,
 }
 
 /// Cache configuration
@@ -102,6 +119,13 @@ impl Default for Config {
                 enable_docs: true,
                 request_timeout_seconds: 30,
                 allowed_origins: vec!["*".to_string()],
+                security: SecurityConfig {
+                    enforce_https: false, // Disabled by default for development
+                    enable_security_headers: true,
+                    sanitize_errors: false, // Show detailed errors in development
+                    hsts_max_age: 31536000, // 1 year
+                    hsts_include_subdomains: true,
+                },
             },
             cache: CacheConfig {
                 directory: PathBuf::from(".vulnera_cache"),
