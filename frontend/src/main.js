@@ -460,9 +460,8 @@ document.addEventListener("DOMContentLoaded", function () {
     <!-- Navigation -->
     <div class="navbar bg-base-100 shadow-lg px-2 sm:px-4">
       <div class="flex-1">
-        <a class="btn btn-ghost text-lg sm:text-xl">
-          <i class="fas fa-shield-alt text-primary"></i>
-          <span class="hidden xs:inline ml-2">Vulnera</span>
+        <a class="btn btn-ghost text-2xl sm:text-3xl">
+          <img src="/images/logo.png" alt="Vulnera Logo" class="h-10 sm:h-20 w-auto mr-2">
         </a>
       </div>
       <div class="flex-none">
@@ -475,15 +474,16 @@ document.addEventListener("DOMContentLoaded", function () {
     </div>
 
     <!-- Main Content -->
-    <div class="min-h-screen bg-base-200 p-3 sm:p-6">
+    <div class="min-h-screen bg-base-200 p-2 sm:p-4">
       <div class="max-w-7xl mx-auto">
         <!-- Hero Section -->
-        <div class="text-center mb-8 sm:mb-12">
-          <h1 class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold text-primary mb-3 sm:mb-4">
-            <i class="fas fa-shield-alt"></i>
-            Vulnera
+        <div class="text-center mb-6 sm:mb-8">
+          <div class="flex justify-center mb-2">
+            <img src="/images/logo.png" alt="Vulnera Logo" class="h-24 sm:h-38 md:h-47 lg:h-58 xl:h-70 w-auto">
+          </div>
+      
           </h1>
-          <p class="text-base sm:text-lg md:text-xl opacity-70 mb-4 sm:mb-6 px-4">
+          <p class="text-base sm:text-lg md:text-xl opacity-70 mb-3 sm:mb-4 px-4">
             Comprehensive vulnerability analysis for your dependencies
           </p>
           <div class="flex flex-wrap justify-center gap-2 sm:gap-4 mb-6 sm:mb-8 px-4">
