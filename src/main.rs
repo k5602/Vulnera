@@ -61,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let analysis_service = Arc::new(AnalysisServiceImpl::new(
         parser_factory,
-        vulnerability_repository,
+        vulnerability_repository.clone(),
         cache_service.clone(),
     ));
     let report_service = Arc::new(ReportServiceImpl::new());
@@ -71,6 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         analysis_service,
         cache_service,
         report_service,
+        vulnerability_repository,
     };
 
     // Create router

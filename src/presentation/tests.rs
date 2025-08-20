@@ -56,7 +56,7 @@ mod tests {
 
         let analysis_service = Arc::new(AnalysisServiceImpl::new(
             parser_factory,
-            vuln_repo,
+            vuln_repo.clone(),
             cache_service.clone(),
         ));
         let report_service = Arc::new(ReportServiceImpl::new());
@@ -64,6 +64,7 @@ mod tests {
             analysis_service,
             cache_service,
             report_service,
+            vulnerability_repository: vuln_repo,
         }
     }
 

@@ -115,6 +115,7 @@ pub struct AppState {
     pub analysis_service: Arc<dyn crate::application::AnalysisService>,
     pub cache_service: Arc<crate::application::CacheServiceImpl>,
     pub report_service: Arc<crate::application::ReportServiceImpl>,
+    pub vulnerability_repository: Arc<dyn crate::infrastructure::VulnerabilityRepository>,
 }
 
 /// Analyze dependencies endpoint
@@ -310,19 +311,151 @@ pub async fn get_vulnerability(
     )
 )]
 pub async fn list_vulnerabilities(
-    State(_app_state): State<AppState>,
+    State(app_state): State<AppState>,
     Query(pagination): Query<VulnerabilityListQuery>,
 ) -> Result<Json<VulnerabilityListResponse>, ApplicationError> {
-    tracing::info!("Listing vulnerabilities with pagination");
+    tracing::info!("Listing vulnerabilities with pagination and filters");
 
     // Validate pagination parameters
     let (page, per_page) = pagination.validate()?;
 
-    // For now, return an empty list since we don't have a vulnerability database yet
-    // In a real implementation, this would query the vulnerability repository
-    let vulnerabilities = Vec::new();
-    let total_count = 0u64;
-    let total_pages = ((total_count as f64) / (per_page as f64)).ceil() as u32;
+    // Get vulnerabilities from common packages across different ecosystems
+    let mut all_vulnerabilities = Vec::new();
+
+    // Define popular packages to query for vulnerabilities
+    let popular_packages = vec![
+        // NPM ecosystem
+        (Ecosystem::Npm, "react", "18.0.0"),
+        (Ecosystem::Npm, "lodash", "4.17.20"),
+        (Ecosystem::Npm, "express", "4.17.0"),
+        (Ecosystem::Npm, "axios", "0.21.0"),
+        (Ecosystem::Npm, "moment", "2.24.0"),
+        // Python ecosystem
+        (Ecosystem::PyPI, "django", "3.0.0"),
+        (Ecosystem::PyPI, "flask", "1.1.0"),
+        (Ecosystem::PyPI, "requests", "2.24.0"),
+        (Ecosystem::PyPI, "numpy", "1.19.0"),
+        (Ecosystem::PyPI, "pillow", "8.0.0"),
+        // Maven ecosystem
+        (Ecosystem::Maven, "org.springframework:spring-core", "5.2.0"),
+        (
+            Ecosystem::Maven,
+            "com.fasterxml.jackson.core:jackson-core",
+            "2.10.0",
+        ),
+        (Ecosystem::Maven, "org.apache.commons:commons-lang3", "3.10"),
+        // Go ecosystem
+        (Ecosystem::Go, "github.com/gin-gonic/gin", "1.6.0"),
+        (Ecosystem::Go, "github.com/gorilla/mux", "1.7.0"),
+    ];
+
+    // Query vulnerabilities for popular packages
+    for (ecosystem, name, version) in popular_packages {
+        // Filter by ecosystem if specified
+        if let Some(ref filter_ecosystem) = pagination.ecosystem {
+            let ecosystem_str = match ecosystem {
+                Ecosystem::Npm => "npm",
+                Ecosystem::PyPI => "pypi",
+                Ecosystem::Maven => "maven",
+                Ecosystem::Cargo => "cargo",
+                Ecosystem::Go => "go",
+                Ecosystem::Packagist => "packagist",
+                Ecosystem::RubyGems => "rubygems",
+                Ecosystem::NuGet => "nuget",
+            };
+            if filter_ecosystem.to_lowercase() != ecosystem_str {
+                continue;
+            }
+        }
+
+        // Create package and query vulnerabilities
+        if let Ok(version_obj) = crate::domain::Version::parse(version) {
+            if let Ok(package) =
+                crate::domain::Package::new(name.to_string(), version_obj, ecosystem)
+            {
+                match app_state
+                    .vulnerability_repository
+                    .find_vulnerabilities(&package)
+                    .await
+                {
+                    Ok(vulns) => {
+                        tracing::debug!("Found {} vulnerabilities for {}", vulns.len(), name);
+                        all_vulnerabilities.extend(vulns);
+                    }
+                    Err(e) => {
+                        tracing::debug!("No vulnerabilities found for {}: {}", name, e);
+                    }
+                }
+            }
+        }
+    }
+
+    // Remove duplicates based on vulnerability ID
+    all_vulnerabilities.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
+    all_vulnerabilities.dedup_by(|a, b| a.id.as_str() == b.id.as_str());
+
+    // Apply severity filter if specified
+    if let Some(ref severity_filter) = pagination.severity {
+        let filter_severity = match severity_filter.to_lowercase().as_str() {
+            "critical" => crate::domain::Severity::Critical,
+            "high" => crate::domain::Severity::High,
+            "medium" => crate::domain::Severity::Medium,
+            "low" => crate::domain::Severity::Low,
+            _ => {
+                return Err(ApplicationError::Domain(
+                    crate::domain::DomainError::InvalidInput {
+                        field: "severity".to_string(),
+                        message:
+                            "Invalid severity filter. Must be one of: critical, high, medium, low"
+                                .to_string(),
+                    },
+                ));
+            }
+        };
+        all_vulnerabilities.retain(|v| v.severity == filter_severity);
+    }
+
+    // Apply pagination
+    let total_count = all_vulnerabilities.len() as u64;
+    let start_index = ((page - 1) * per_page) as usize;
+    let end_index = (start_index + per_page as usize).min(all_vulnerabilities.len());
+
+    let paginated_vulnerabilities = if start_index < all_vulnerabilities.len() {
+        &all_vulnerabilities[start_index..end_index]
+    } else {
+        &[]
+    };
+
+    // Convert to DTOs
+    let vulnerabilities: Vec<VulnerabilityDto> = paginated_vulnerabilities
+        .iter()
+        .map(|v| VulnerabilityDto {
+            id: v.id.as_str().to_string(),
+            summary: v.summary.clone(),
+            description: v.description.clone(),
+            severity: format!("{:?}", v.severity),
+            affected_packages: v
+                .affected_packages
+                .iter()
+                .map(|p| AffectedPackageDto {
+                    name: p.package.name.clone(),
+                    version: p.package.version.to_string(),
+                    ecosystem: format!("{:?}", p.package.ecosystem),
+                    vulnerable_ranges: p.vulnerable_ranges.iter().map(|r| r.to_string()).collect(),
+                    fixed_versions: p.fixed_versions.iter().map(|v| v.to_string()).collect(),
+                })
+                .collect(),
+            references: v.references.clone(),
+            published_at: v.published_at,
+            sources: v.sources.iter().map(|s| format!("{:?}", s)).collect(),
+        })
+        .collect();
+
+    let total_pages = if total_count == 0 {
+        1
+    } else {
+        ((total_count as f64) / (per_page as f64)).ceil() as u32
+    };
 
     let pagination_dto = PaginationDto {
         page,
@@ -339,10 +472,11 @@ pub async fn list_vulnerabilities(
     };
 
     tracing::info!(
-        "Retrieved {} vulnerabilities (page {} of {})",
+        "Retrieved {} vulnerabilities (page {} of {}, total: {})",
         response.vulnerabilities.len(),
         page,
-        total_pages
+        total_pages,
+        total_count
     );
 
     Ok(Json(response))

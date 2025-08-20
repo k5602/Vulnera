@@ -165,7 +165,7 @@ impl CacheServiceImpl {
     pub async fn preload_vulnerabilities(
         &self,
         packages: &[Package],
-        vulnerability_repository: &dyn VulnerabilityRepository,
+        vulnerability_repository: Arc<dyn VulnerabilityRepository>,
     ) -> Result<(), ApplicationError> {
         info!(
             "Preloading vulnerability cache for {} packages",
@@ -179,7 +179,7 @@ impl CacheServiceImpl {
             for package in chunk {
                 let package_clone = package.clone();
                 let cache_service = self.cache_repository.clone();
-                let _repo_clone = vulnerability_repository as *const dyn VulnerabilityRepository;
+                let repo_clone = vulnerability_repository.clone();
 
                 join_set.spawn(async move {
                     let cache_key = Self::package_vulnerabilities_key(&package_clone);
@@ -189,12 +189,34 @@ impl CacheServiceImpl {
                         return Ok::<_, ApplicationError>(());
                     }
 
-                    // This is unsafe but necessary for the async context
-                    // In a real implementation, we'd use Arc<dyn VulnerabilityRepository>
-                    debug!(
-                        "Would preload vulnerabilities for: {}",
-                        package_clone.identifier()
-                    );
+                    // Try to find and cache vulnerabilities for this package
+                    match repo_clone.find_vulnerabilities(&package_clone).await {
+                        Ok(vulnerabilities) => {
+                            debug!(
+                                "Preloaded {} vulnerabilities for: {}",
+                                vulnerabilities.len(),
+                                package_clone.identifier()
+                            );
+                            // Cache the vulnerabilities
+                            if let Err(e) = cache_service
+                                .set(&cache_key, &vulnerabilities, Duration::from_secs(3600))
+                                .await
+                            {
+                                warn!(
+                                    "Failed to cache vulnerabilities for {}: {}",
+                                    package_clone.identifier(),
+                                    e
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            debug!(
+                                "Failed to preload vulnerabilities for {}: {}",
+                                package_clone.identifier(),
+                                e
+                            );
+                        }
+                    }
                     Ok(())
                 });
             }
