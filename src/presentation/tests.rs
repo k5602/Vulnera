@@ -2,7 +2,9 @@
 mod tests {
     use crate::{
         application::errors::VulnerabilityError,
-        application::{AnalysisServiceImpl, CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl},
+        application::{
+            AnalysisServiceImpl, CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl,
+        },
         domain::Package,
         infrastructure::{
             api_clients::traits::{RawVulnerability, VulnerabilityApiClient},
@@ -60,7 +62,7 @@ mod tests {
             cache_service.clone(),
         ));
         let report_service = Arc::new(ReportServiceImpl::new());
-        
+
         // Create popular package service with test config
         let config = Arc::new(crate::Config::default());
         let popular_package_service = Arc::new(PopularPackageServiceImpl::new(
@@ -68,7 +70,7 @@ mod tests {
             cache_service.clone(),
             config,
         ));
-        
+
         AppState {
             analysis_service,
             cache_service,
