@@ -6,6 +6,13 @@ enable_docs = true
 request_timeout_seconds = 40
 allowed_origins = ["https://staging.vulnera.dev"]
 
+[server.security]
+enforce_https = true
+enable_security_headers = true
+sanitize_errors = true
+hsts_max_age = 31536000
+hsts_include_subdomains = true
+
 [cache]
 ttl_hours = 12
 
