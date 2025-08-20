@@ -821,7 +821,7 @@ impl ReportServiceImpl {
                     if !vuln.references.is_empty() {
                         report.push_str(&format!("  References: {}\n", vuln.references.join(", ")));
                     }
-                    report.push_str("\n");
+                    report.push('\n');
                 }
             }
         }
@@ -833,7 +833,7 @@ impl ReportServiceImpl {
             for package in clean_packages {
                 report.push_str(&format!("- {}\n", package.identifier()));
             }
-            report.push_str("\n");
+            report.push('\n');
         }
 
         report

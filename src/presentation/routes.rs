@@ -23,7 +23,7 @@ use crate::presentation::{
         },
         health::{detailed_health_check, health_check, liveness_probe, metrics, readiness_probe},
     },
-    middleware::{logging_middleware, security_headers_middleware, https_enforcement_middleware},
+    middleware::{https_enforcement_middleware, logging_middleware, security_headers_middleware},
     models::*,
 };
 use axum::{
@@ -170,7 +170,7 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
         router = router.layer(middleware::from_fn(security_headers_middleware));
     }
 
-    // Conditionally add HTTPS enforcement middleware  
+    // Conditionally add HTTPS enforcement middleware
     if config.server.security.enforce_https {
         router = router.layer(middleware::from_fn(https_enforcement_middleware));
     }

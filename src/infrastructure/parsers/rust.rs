@@ -8,6 +8,12 @@ use async_trait::async_trait;
 /// Parser for Cargo.toml files
 pub struct CargoParser;
 
+impl Default for CargoParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CargoParser {
     pub fn new() -> Self {
         Self
@@ -128,6 +134,12 @@ impl PackageFileParser for CargoParser {
 
 /// Parser for Cargo.lock files
 pub struct CargoLockParser;
+
+impl Default for CargoLockParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl CargoLockParser {
     pub fn new() -> Self {

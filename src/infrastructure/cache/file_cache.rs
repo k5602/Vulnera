@@ -225,7 +225,7 @@ impl FileCacheRepository {
             let path = entry.path();
 
             // Skip non-JSON files and temporary files
-            if !path.extension().map_or(false, |ext| ext == "json") {
+            if !path.extension().is_some_and(|ext| ext == "json") {
                 continue;
             }
 
@@ -267,15 +267,15 @@ impl FileCacheRepository {
     async fn check_and_cleanup_entry(&self, path: &PathBuf) -> Result<bool, ApplicationError> {
         let content = fs::read_to_string(path)
             .await
-            .map_err(|e| ApplicationError::Io(e))?;
+            .map_err(ApplicationError::Io)?;
 
         let entry: CacheEntry<serde_json::Value> =
-            serde_json::from_str(&content).map_err(|e| ApplicationError::Json(e))?;
+            serde_json::from_str(&content).map_err(ApplicationError::Json)?;
 
         if Self::is_entry_expired(&entry) {
             fs::remove_file(path)
                 .await
-                .map_err(|e| ApplicationError::Io(e))?;
+                .map_err(ApplicationError::Io)?;
             debug!("Cleaned up expired cache file: {:?}", path);
             Ok(true)
         } else {
@@ -290,17 +290,17 @@ impl FileCacheRepository {
 
         let mut entries = fs::read_dir(&self.cache_dir)
             .await
-            .map_err(|e| ApplicationError::Io(e))?;
+            .map_err(ApplicationError::Io)?;
 
         while let Some(entry) = entries
             .next_entry()
             .await
-            .map_err(|e| ApplicationError::Io(e))?
+            .map_err(ApplicationError::Io)?
         {
             let path = entry.path();
 
             // Only count JSON cache files
-            if path.extension().map_or(false, |ext| ext == "json") {
+            if path.extension().is_some_and(|ext| ext == "json") {
                 if let Ok(metadata) = fs::metadata(&path).await {
                     total_size += metadata.len();
                     entry_count += 1;

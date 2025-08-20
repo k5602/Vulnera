@@ -151,8 +151,10 @@ impl OsvClient {
             .unwrap_or_default()
             .into_iter()
             .map(|osv_affected| {
-                use super::traits::{AffectedPackageData, PackageInfo, VersionRangeData, VersionEventData};
-                
+                use super::traits::{
+                    AffectedPackageData, PackageInfo, VersionEventData, VersionRangeData,
+                };
+
                 AffectedPackageData {
                     package: PackageInfo {
                         name: osv_affected.package.name,
@@ -160,18 +162,21 @@ impl OsvClient {
                         purl: osv_affected.package.purl,
                     },
                     ranges: osv_affected.ranges.map(|ranges| {
-                        ranges.into_iter().map(|range| {
-                            VersionRangeData {
+                        ranges
+                            .into_iter()
+                            .map(|range| VersionRangeData {
                                 range_type: range.range_type,
                                 repo: range.repo,
-                                events: range.events.into_iter().map(|event| {
-                                    VersionEventData {
+                                events: range
+                                    .events
+                                    .into_iter()
+                                    .map(|event| VersionEventData {
                                         event_type: event.event_type,
                                         value: event.value,
-                                    }
-                                }).collect(),
-                            }
-                        }).collect()
+                                    })
+                                    .collect(),
+                            })
+                            .collect()
                     }),
                     versions: osv_affected.versions,
                 }

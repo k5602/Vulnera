@@ -1,11 +1,11 @@
 //! HTTP middleware for the web server
 
 use axum::{
+    Json,
     extract::Request,
     http::{HeaderValue, StatusCode},
     middleware::Next,
-    response::{IntoResponse, Response, Redirect},
-    Json,
+    response::{IntoResponse, Redirect, Response},
 };
 use chrono::Utc;
 use std::time::Instant;
@@ -20,7 +20,7 @@ impl IntoResponse for ApplicationError {
         // Get the configuration to determine if we should sanitize errors
         // Note: In a real implementation, you'd pass this through middleware state
         let sanitize_errors = std::env::var("ENV").unwrap_or_default() == "production";
-        
+
         let (status, code, message) = match self {
             ApplicationError::Parse(_) => (
                 StatusCode::BAD_REQUEST,
@@ -82,52 +82,49 @@ pub async fn security_headers_middleware(
     next: Next,
 ) -> Response {
     let mut response = next.run(request).await;
-    
+
     // Add security headers
     let headers = response.headers_mut();
-    
+
     // Strict-Transport-Security (HSTS)
     headers.insert(
         "strict-transport-security",
         HeaderValue::from_static("max-age=31536000; includeSubDomains; preload"),
     );
-    
+
     // X-Frame-Options (prevent clickjacking)
-    headers.insert(
-        "x-frame-options",
-        HeaderValue::from_static("DENY"),
-    );
-    
+    headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
+
     // X-Content-Type-Options (prevent MIME sniffing)
     headers.insert(
         "x-content-type-options",
         HeaderValue::from_static("nosniff"),
     );
-    
+
     // X-XSS-Protection (XSS protection)
     headers.insert(
         "x-xss-protection",
         HeaderValue::from_static("1; mode=block"),
     );
-    
+
     // Referrer-Policy (control referrer information)
     headers.insert(
         "referrer-policy",
         HeaderValue::from_static("strict-origin-when-cross-origin"),
     );
-    
+
     // Content-Security-Policy (CSP)
     headers.insert(
         "content-security-policy",
         HeaderValue::from_static("default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; img-src 'self' data: https:; font-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; connect-src 'self' https:; frame-ancestors 'none';"),
     );
-    
+
     // Permissions-Policy (control browser features)
     headers.insert(
         "permissions-policy",
         HeaderValue::from_static("camera=(), microphone=(), geolocation=(), interest-cohort=()"),
     );
-    
+
     response
 }
 
@@ -146,17 +143,25 @@ pub async fn https_enforcement_middleware(
             // Fallback: check the URI scheme (though this won't work behind a proxy)
             request.uri().scheme_str() == Some("https")
         });
-    
+
     if !is_https {
         // Get the host header
         if let Some(host) = request.headers().get("host").and_then(|h| h.to_str().ok()) {
-            let https_url = format!("https://{}{}", host, request.uri().path_and_query().map(|pq| pq.as_str()).unwrap_or("/"));
-            
+            let https_url = format!(
+                "https://{}{}",
+                host,
+                request
+                    .uri()
+                    .path_and_query()
+                    .map(|pq| pq.as_str())
+                    .unwrap_or("/")
+            );
+
             // Return a redirect to HTTPS
             return Redirect::permanent(&https_url).into_response();
         }
     }
-    
+
     // Continue with the request if HTTPS or if we can't determine
     next.run(request).await
 }

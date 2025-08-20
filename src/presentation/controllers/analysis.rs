@@ -328,7 +328,7 @@ pub async fn list_vulnerabilities(
                 return Err(ApplicationError::Domain(
                     crate::domain::DomainError::InvalidInput {
                         field: "severity".to_string(),
-                        message: 
+                        message:
                             "Invalid severity filter. Must be one of: critical, high, medium, low"
                                 .to_string(),
                     },
