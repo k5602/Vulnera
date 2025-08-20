@@ -1,7 +1,7 @@
 # اسم الـ Workflow الذي سيظهر في صفحة Actions في GitHub
 name: Deploy Frontend to Azure Storage
 
-# متى يتم تشغيل هذا الـ Workflow
+# هذا الجزء يحدد متى يتم تشغيل الـ Workflow
 on:
   # يتم التشغيل عند أي عملية push على فرع main
   push:
@@ -11,32 +11,32 @@ on:
 # المهام التي سيتم تنفيذها
 jobs:
   build-and-deploy:
-    # نوع النظام الذي ستعمل عليه المهمة
+    # نوع النظام الذي ستعمل عليه المهمة (أحدث نسخة من أوبونتو)
     runs-on: ubuntu-latest
 
     # الخطوات التي سيتم تنفيذها بالترتيب
     steps:
-      # 1. سحب الكود من الـ repository
+      # 1. سحب الكود من المستودع (repository) لكي يتمكن الـ runner من الوصول إليه
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      # 2. إعداد بيئة عمل Node.js
+      # 2. إعداد بيئة عمل Node.js بالإصدار 18
       - name: Setup Node
         uses: actions/setup-node@v3
         with:
           node-version: '18'
 
-      # 3. تثبيت الاعتماديات (dependencies) الخاصة بالمشروع
+      # 3. تثبيت الاعتماديات (dependencies) الخاصة بالمشروع من ملف package.json
       - name: Install dependencies
         # تحديد المجلد الذي يحتوي على الواجهة الأمامية
         working-directory: ./frontend
         run: npm install
 
-      # 4. بناء المشروع وتحويله إلى ملفات static
+      # 4. بناء المشروع وتحويله إلى ملفات static جاهزة للنشر
       - name: Build project
         working-directory: ./frontend
         run: npm run build
-        # هنا يتم حقن متغيرات البيئة أثناء عملية البناء
+        # هنا يتم حقن متغيرات البيئة الصحيحة الخاصة بالإنتاج أثناء عملية البناء
         env:
           VITE_API_BASE_URL: https://vulnera-back.politeisland-d68133bc.switzerlandnorth.azurecontainerapps.io
           VITE_API_VERSION: v1
@@ -46,7 +46,7 @@ jobs:
           VITE_ENVIRONMENT: production
           VITE_ENABLE_DEBUG: false
 
-      # 5. رفع الملفات الناتجة إلى Azure Storage Account
+      # 5. رفع الملفات الناتجة من عملية البناء إلى Azure Storage Account
       - name: Upload to Azure Storage
         uses: azure/CLI@v1
         with:
@@ -58,5 +58,5 @@ jobs:
               -d '$web' \
               --overwrite true
         env:
-          # هذا المتغير يجب أن يكون مُعرفًا في GitHub Secrets
+          # هذا المتغير السري يجب أن يكون مُعرفًا في إعدادات GitHub Secrets
           AZURE_STORAGE_KEY: ${{ secrets.AZURE_STORAGE_KEY }}
