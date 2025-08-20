@@ -36,7 +36,45 @@ jobs:
       - name: Build project
         working-directory: ./frontend
         run: npm run build
-        # هنا يتم حقن متغيرات البيئة الصحيحة الخاصة بالإنتاج أثناء عملية البناء
+# The name of the Workflow as it will appear in the Actions page on GitHub
+name: Deploy Frontend to Azure Storage
+
+# This section specifies when the Workflow will be triggered
+on:
+  # Trigger on any push to the main branch
+  push:
+    branches:
+      - main
+
+# The jobs to be executed
+jobs:
+  build-and-deploy:
+    # The operating system for the job (latest Ubuntu version)
+    runs-on: ubuntu-latest
+
+    # The steps to be executed in order
+    steps:
+      # 1. Checkout the code from the repository so the runner can access it
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      # 2. Set up Node.js environment with version 18
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      # 3. Install project dependencies from package.json
+      - name: Install dependencies
+        # Specify the folder containing the frontend
+        working-directory: ./frontend
+        run: npm install
+
+      # 4. Build the project and generate static files ready for deployment
+      - name: Build project
+        working-directory: ./frontend
+        run: npm run build
+        # Inject the correct production environment variables during the build process
         env:
           VITE_API_BASE_URL: https://vulnera-back.politeisland-d68133bc.switzerlandnorth.azurecontainerapps.io
           VITE_API_VERSION: v1
