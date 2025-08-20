@@ -1,0 +1,42 @@
+name: Deploy Frontend to Azure Storage
+
+on:
+  push:
+    branches:
+      - main  
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: ./frontend
+
+      - name: Build project
+        run: npm run build
+        working-directory: ./frontend
+
+      - name: Deploy to Azure Storage
+        uses: azure/cli@v2
+        with:
+          azcliversion: 2.64.0
+        env:
+          AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          AZURE_STORAGE_KEY: ${{ secrets.AZURE_STORAGE_KEY }}
+        run: |
+          az storage blob upload-batch \
+            --account-name $AZURE_STORAGE_ACCOUNT \
+            --account-key $AZURE_STORAGE_KEY \
+            -s ./frontend/build \
+            -d '$web' \
+            --overwrite
