@@ -9,6 +9,12 @@ use serde_json::Value;
 /// Parser for package.json files
 pub struct NpmParser;
 
+impl Default for NpmParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NpmParser {
     pub fn new() -> Self {
         Self
@@ -135,6 +141,12 @@ impl PackageFileParser for NpmParser {
 /// Parser for package-lock.json files
 pub struct PackageLockParser;
 
+impl Default for PackageLockParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PackageLockParser {
     pub fn new() -> Self {
         Self
@@ -202,6 +214,12 @@ impl PackageFileParser for PackageLockParser {
 
 /// Parser for yarn.lock files
 pub struct YarnLockParser;
+
+impl Default for YarnLockParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl YarnLockParser {
     pub fn new() -> Self {

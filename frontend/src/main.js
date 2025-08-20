@@ -1,39 +1,139 @@
 import "./style.css";
 import { generateHTMLReport } from "./html-report-generator.js";
 
-// Configuration from environment variables
-const CONFIG = {
-  API_BASE_URL: 
-    (import.meta.env && import.meta.env.VITE_API_BASE_URL) ||
-    (typeof window !== "undefined" && window.VULNERA_API_BASE_URL) ||
-    "http://localhost:3000", // Fallback to local development server
-  
-  API_VERSION: 
-    (import.meta.env && import.meta.env.VITE_API_VERSION) || 
-    "v1",
-  
-  APP_NAME: 
-    (import.meta.env && import.meta.env.VITE_APP_NAME) || 
-    "Vulnera",
+/**
+ * Environment Configuration System
+ * Supports multiple environment variable sources with priority:
+ * 1. Vite environment variables (VITE_*)
+ * 2. Window object variables (for runtime configuration)
+ * 3. Process environment variables (for Node.js environments)
+ * 4. Default fallback values
+ */
+function getEnvironmentConfig() {
+  // Helper function to get environment variable with fallback
+  const getEnvVar = (viteKey, windowKey, processKey, defaultValue) => {
+    // Priority 1: Vite environment variables (build-time)
+    if (import.meta.env && import.meta.env[viteKey]) {
+      return import.meta.env[viteKey];
+    }
     
-  APP_VERSION: 
-    (import.meta.env && import.meta.env.VITE_APP_VERSION) || 
-    "1.0.0"
-};
+    // Priority 2: Window object (runtime configuration)
+    if (typeof window !== "undefined" && window[windowKey]) {
+      return window[windowKey];
+    }
+    
+    // Priority 3: Process environment (Node.js environments)
+    if (typeof process !== "undefined" && process.env && process.env[processKey]) {
+      return process.env[processKey];
+    }
+    
+    // Priority 4: Default fallback
+    return defaultValue;
+  };
 
-// Build complete API URL
-const API_BASE_URL = CONFIG.API_BASE_URL;
-const API_ENDPOINT = `${API_BASE_URL}/api/${CONFIG.API_VERSION}`;
+  const config = {
+    API_BASE_URL: getEnvVar(
+      'VITE_API_BASE_URL',
+      'VULNERA_API_BASE_URL', 
+      'API_BASE_URL',
+      'http://localhost:3000'
+    ),
+    
+    API_VERSION: getEnvVar(
+      'VITE_API_VERSION',
+      'VULNERA_API_VERSION',
+      'API_VERSION',
+      'v1'
+    ),
+    
+    APP_NAME: getEnvVar(
+      'VITE_APP_NAME',
+      'VULNERA_APP_NAME',
+      'APP_NAME',
+      'Vulnera'
+    ),
+    
+    APP_VERSION: getEnvVar(
+      'VITE_APP_VERSION',
+      'VULNERA_APP_VERSION',
+      'APP_VERSION',
+      '1.0.0'
+    ),
 
-// Log configuration for debugging (only in development)
-if (import.meta.env.DEV) {
-  console.log("🔧 App Configuration:", {
-    API_BASE_URL,
-    API_ENDPOINT,
-    APP_NAME: CONFIG.APP_NAME,
-    APP_VERSION: CONFIG.APP_VERSION,
-    MODE: import.meta.env.MODE
-  });
+    // Additional configuration options
+    ENABLE_DEBUG: getEnvVar(
+      'VITE_ENABLE_DEBUG',
+      'VULNERA_ENABLE_DEBUG',
+      'ENABLE_DEBUG',
+      import.meta.env?.DEV ? 'true' : 'false'
+    ),
+
+    API_TIMEOUT: parseInt(getEnvVar(
+      'VITE_API_TIMEOUT',
+      'VULNERA_API_TIMEOUT',
+      'API_TIMEOUT',
+      '30000'
+    )),
+
+    ENVIRONMENT: getEnvVar(
+      'VITE_ENVIRONMENT',
+      'VULNERA_ENVIRONMENT',
+      'NODE_ENV',
+      import.meta.env?.MODE || 'development'
+    )
+  };
+
+  // Validate API_BASE_URL format
+  try {
+    new URL(config.API_BASE_URL);
+  } catch (error) {
+    console.warn(`⚠️ Invalid API_BASE_URL format: ${config.API_BASE_URL}. Using default.`);
+    config.API_BASE_URL = 'http://localhost:3000';
+  }
+
+  // Remove trailing slash from API_BASE_URL
+  config.API_BASE_URL = config.API_BASE_URL.replace(/\/$/, '');
+
+  // Build complete API endpoint
+  config.API_ENDPOINT = `${config.API_BASE_URL}/api/${config.API_VERSION}`;
+
+  return config;
+}
+
+// Initialize configuration
+const CONFIG = getEnvironmentConfig();
+
+// Destructure for easier access
+const { API_BASE_URL, API_ENDPOINT, APP_NAME, APP_VERSION, ENABLE_DEBUG, API_TIMEOUT, ENVIRONMENT } = CONFIG;
+
+// Enhanced logging for debugging
+if (ENABLE_DEBUG === 'true' || import.meta.env?.DEV) {
+  console.group("🔧 Vulnera Configuration");
+  console.log("Environment:", ENVIRONMENT);
+  console.log("API Base URL:", API_BASE_URL);
+  console.log("API Endpoint:", API_ENDPOINT);
+  console.log("App Name:", APP_NAME);
+  console.log("App Version:", APP_VERSION);
+  console.log("API Timeout:", API_TIMEOUT + "ms");
+  console.log("Debug Mode:", ENABLE_DEBUG);
+  
+  // Show environment variable sources
+  console.group("Environment Variable Sources:");
+  console.log("Vite Env:", import.meta.env || 'Not available');
+  console.log("Window Vars:", typeof window !== 'undefined' ? {
+    VULNERA_API_BASE_URL: window.VULNERA_API_BASE_URL,
+    VULNERA_API_VERSION: window.VULNERA_API_VERSION,
+    VULNERA_APP_NAME: window.VULNERA_APP_NAME
+  } : 'Not available');
+  console.groupEnd();
+  console.groupEnd();
+
+  // Test API connectivity in development
+  if (ENVIRONMENT === 'development') {
+    fetch(`${API_BASE_URL}/health`)
+      .then(response => response.ok ? console.log("✅ Backend health check passed") : console.warn("⚠️ Backend health check failed"))
+      .catch(() => console.warn("⚠️ Backend not reachable at", API_BASE_URL));
+  }
 }
 
 // Theme switching functionality
@@ -195,21 +295,39 @@ function initDragAndDrop() {
 
     try {
       const file_content = await file.text();
-      console.log("🔍 API Request to:", `${API_ENDPOINT}/analyze`);
-      console.log("📤 Request data:", { ecosystem, filename: file.name });
+      
+      if (ENABLE_DEBUG === 'true') {
+        console.log("🔍 API Request to:", `${API_ENDPOINT}/analyze`);
+        console.log("📤 Request data:", { ecosystem, filename: file.name });
+      }
+
+      // Create AbortController for request timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
 
       const res = await fetch(`${API_ENDPOINT}/analyze`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
+          "User-Agent": `${APP_NAME}/${APP_VERSION}`,
         },
         body: JSON.stringify({ ecosystem, file_content, filename: file.name }),
+        signal: controller.signal,
       });
 
-      console.log("📥 Response status:", res.status, res.statusText);
+      // Clear timeout if request completes
+      clearTimeout(timeoutId);
+
+      if (ENABLE_DEBUG === 'true') {
+        console.log("📥 Response status:", res.status, res.statusText);
+      }
+      
       const payload = await res.json().catch(() => ({}));
-      console.log("📊 Response payload:", payload);
+      
+      if (ENABLE_DEBUG === 'true') {
+        console.log("📊 Response payload:", payload);
+      }
 
       loadingModal.checked = false;
 
@@ -229,7 +347,28 @@ function initDragAndDrop() {
       renderAnalysisResult(payload);
     } catch (err) {
       loadingModal.checked = false;
-      showError("Network error while contacting the API.");
+      
+      // Enhanced error handling
+      let errorMessage = "Network error while contacting the API.";
+      
+      if (err.name === 'AbortError') {
+        errorMessage = `Request timeout (${API_TIMEOUT}ms). The server might be slow or unavailable.`;
+      } else if (err.message.includes('Failed to fetch')) {
+        errorMessage = `Cannot reach the API server at ${API_BASE_URL}. Please check your connection or try switching to a different environment.`;
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      showError(errorMessage);
+      
+      if (ENABLE_DEBUG === 'true') {
+        console.error("API Error Details:", {
+          error: err,
+          apiEndpoint: API_ENDPOINT,
+          environment: ENVIRONMENT,
+          timestamp: new Date().toISOString()
+        });
+      }
       console.error(err);
     }
   }

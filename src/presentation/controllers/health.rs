@@ -164,10 +164,8 @@ pub async fn metrics(State(app_state): State<AppState>) -> Result<String, Status
     let mut metrics = String::new();
 
     // Add basic service metrics
-    metrics.push_str(&format!(
-        "# HELP vulnera_info Information about the Vulnera service\n"
-    ));
-    metrics.push_str(&format!("# TYPE vulnera_info gauge\n"));
+    metrics.push_str("# HELP vulnera_info Information about the Vulnera service\n");
+    metrics.push_str("# TYPE vulnera_info gauge\n");
     metrics.push_str(&format!(
         "vulnera_info{{version=\"{}\"}} 1\n",
         env!("CARGO_PKG_VERSION")
@@ -175,43 +173,33 @@ pub async fn metrics(State(app_state): State<AppState>) -> Result<String, Status
 
     // Add cache metrics if available
     if let Ok(cache_stats) = app_state.cache_service.get_cache_statistics().await {
-        metrics.push_str(&format!(
-            "# HELP vulnera_cache_hits_total Total number of cache hits\n"
-        ));
-        metrics.push_str(&format!("# TYPE vulnera_cache_hits_total counter\n"));
+        metrics.push_str("# HELP vulnera_cache_hits_total Total number of cache hits\n");
+        metrics.push_str("# TYPE vulnera_cache_hits_total counter\n");
         metrics.push_str(&format!("vulnera_cache_hits_total {}\n", cache_stats.hits));
 
-        metrics.push_str(&format!(
-            "# HELP vulnera_cache_misses_total Total number of cache misses\n"
-        ));
-        metrics.push_str(&format!("# TYPE vulnera_cache_misses_total counter\n"));
+        metrics.push_str("# HELP vulnera_cache_misses_total Total number of cache misses\n");
+        metrics.push_str("# TYPE vulnera_cache_misses_total counter\n");
         metrics.push_str(&format!(
             "vulnera_cache_misses_total {}\n",
             cache_stats.misses
         ));
 
-        metrics.push_str(&format!(
-            "# HELP vulnera_cache_hit_rate Cache hit rate (0.0 to 1.0)\n"
-        ));
-        metrics.push_str(&format!("# TYPE vulnera_cache_hit_rate gauge\n"));
+        metrics.push_str("# HELP vulnera_cache_hit_rate Cache hit rate (0.0 to 1.0)\n");
+        metrics.push_str("# TYPE vulnera_cache_hit_rate gauge\n");
         metrics.push_str(&format!(
             "vulnera_cache_hit_rate {}\n",
             cache_stats.hit_rate
         ));
 
-        metrics.push_str(&format!(
-            "# HELP vulnera_cache_entries_total Total number of cache entries\n"
-        ));
-        metrics.push_str(&format!("# TYPE vulnera_cache_entries_total gauge\n"));
+        metrics.push_str("# HELP vulnera_cache_entries_total Total number of cache entries\n");
+        metrics.push_str("# TYPE vulnera_cache_entries_total gauge\n");
         metrics.push_str(&format!(
             "vulnera_cache_entries_total {}\n",
             cache_stats.total_entries
         ));
 
-        metrics.push_str(&format!(
-            "# HELP vulnera_cache_size_bytes Total cache size in bytes\n"
-        ));
-        metrics.push_str(&format!("# TYPE vulnera_cache_size_bytes gauge\n"));
+        metrics.push_str("# HELP vulnera_cache_size_bytes Total cache size in bytes\n");
+        metrics.push_str("# TYPE vulnera_cache_size_bytes gauge\n");
         metrics.push_str(&format!(
             "vulnera_cache_size_bytes {}\n",
             cache_stats.total_size_bytes
@@ -219,11 +207,9 @@ pub async fn metrics(State(app_state): State<AppState>) -> Result<String, Status
     }
 
     // Add uptime metric (placeholder)
-    metrics.push_str(&format!(
-        "# HELP vulnera_uptime_seconds Service uptime in seconds\n"
-    ));
-    metrics.push_str(&format!("# TYPE vulnera_uptime_seconds counter\n"));
-    metrics.push_str(&format!("vulnera_uptime_seconds 0\n")); // Placeholder
+    metrics.push_str("# HELP vulnera_uptime_seconds Service uptime in seconds\n");
+    metrics.push_str("# TYPE vulnera_uptime_seconds counter\n");
+    metrics.push_str("vulnera_uptime_seconds 0\n"); // Placeholder
 
     Ok(metrics)
 }

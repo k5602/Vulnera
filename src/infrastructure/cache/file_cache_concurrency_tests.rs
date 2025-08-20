@@ -5,7 +5,7 @@ mod tests {
     use super::super::file_cache::FileCacheRepository;
     use crate::application::CacheService;
     use serde::{Deserialize, Serialize};
-    
+
     use std::sync::Arc;
     use std::time::Duration;
     use tempfile::TempDir;

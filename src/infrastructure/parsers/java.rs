@@ -9,6 +9,12 @@ use regex::Regex;
 /// Parser for Maven pom.xml files
 pub struct MavenParser;
 
+impl Default for MavenParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MavenParser {
     pub fn new() -> Self {
         Self
@@ -115,6 +121,12 @@ impl PackageFileParser for MavenParser {
 
 /// Parser for Gradle build files
 pub struct GradleParser;
+
+impl Default for GradleParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl GradleParser {
     pub fn new() -> Self {

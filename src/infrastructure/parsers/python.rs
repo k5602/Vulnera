@@ -8,6 +8,12 @@ use async_trait::async_trait;
 /// Parser for requirements.txt files
 pub struct RequirementsTxtParser;
 
+impl Default for RequirementsTxtParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RequirementsTxtParser {
     pub fn new() -> Self {
         Self
@@ -130,6 +136,12 @@ impl PackageFileParser for RequirementsTxtParser {
 /// Parser for Pipfile files
 pub struct PipfileParser;
 
+impl Default for PipfileParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PipfileParser {
     pub fn new() -> Self {
         Self
@@ -246,6 +258,12 @@ impl PackageFileParser for PipfileParser {
 
 /// Parser for pyproject.toml files
 pub struct PyProjectTomlParser;
+
+impl Default for PyProjectTomlParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl PyProjectTomlParser {
     pub fn new() -> Self {

@@ -7,11 +7,11 @@ request_timeout_seconds = 60
 allowed_origins = ["*"]
 
 [server.security]
-enforce_https = false  # Don't enforce HTTPS in development
+enforce_https = false           # Don't enforce HTTPS in development
 enable_security_headers = true  # But enable security headers for testing
-sanitize_errors = false  # Show full errors in development
+sanitize_errors = false         # Show full errors in development
 hsts_max_age = 31536000
-hsts_include_subdomains = false  # Don't include subdomains in dev
+hsts_include_subdomains = false # Don't include subdomains in dev
 
 [cache]
 ttl_hours = 1

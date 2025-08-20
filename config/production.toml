@@ -4,15 +4,13 @@ port = 3000
 workers = 0
 enable_docs = false
 request_timeout_seconds = 30
-allowed_origins = [
-    "${ALLOWED_ORIGIN}",
-]
+allowed_origins = ["${ALLOWED_ORIGIN}"]
 
 [server.security]
 enforce_https = true
 enable_security_headers = true
 sanitize_errors = true
-hsts_max_age = 31536000  # 1 year in seconds
+hsts_max_age = 31536000        # 1 year in seconds
 hsts_include_subdomains = true
 
 [cache]

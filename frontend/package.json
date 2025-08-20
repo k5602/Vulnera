@@ -1,16 +1,30 @@
 {
-  "name": "frontend",
+  "name": "vulnera-frontend",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "description": "Vulnera Frontend - Vulnerability Analysis Interface",
   "scripts": {
     "dev": "vite",
+    "dev:local": "vite --mode development",
+    "dev:staging": "vite --mode staging", 
     "build": "vite build",
-    "preview": "vite preview"
+    "build:staging": "vite build --mode staging",
+    "build:production": "vite build --mode production",
+    "preview": "vite preview",
+    "preview:staging": "vite preview --mode staging",
+    "preview:production": "vite preview --mode production",
+    "switch:local": "./switch-api.sh local",
+    "switch:remote": "./switch-api.sh remote",
+    "switch:azure": "./switch-api.sh azure",
+    "switch:production": "./switch-api.sh production",
+    "switch:staging": "./switch-api.sh staging",
+    "config:show": "./switch-api.sh status",
+    "env:init": "cp .env.example .env && echo 'Created .env from .env.example'"
   },
   "devDependencies": {
     "daisyui": "^5.0.50",
-    "vite": "^7.1.2"
+    "vite": "^7.1.3"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.12",

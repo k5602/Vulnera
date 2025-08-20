@@ -9,10 +9,10 @@ pub mod repositories;
 pub mod resilience;
 
 // Re-export specific items to avoid ambiguous glob conflicts
-pub use api_clients::{GhsaClient, NvdClient, OsvClient};
 pub use api_clients::traits::VulnerabilityApiClient;
+pub use api_clients::{GhsaClient, NvdClient, OsvClient};
 pub use cache::*;
-pub use parsers::{ParserFactory};
+pub use parsers::ParserFactory;
 pub use parsers::traits::PackageFileParser;
 pub use repositories::*;
 pub use resilience::*;

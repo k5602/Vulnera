@@ -9,6 +9,12 @@ use serde_json::Value;
 /// Parser for composer.json files
 pub struct ComposerParser;
 
+impl Default for ComposerParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ComposerParser {
     pub fn new() -> Self {
         Self
@@ -132,6 +138,12 @@ impl PackageFileParser for ComposerParser {
 
 /// Parser for composer.lock files
 pub struct ComposerLockParser;
+
+impl Default for ComposerLockParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ComposerLockParser {
     pub fn new() -> Self {

@@ -8,6 +8,12 @@ use async_trait::async_trait;
 /// Parser for go.mod files
 pub struct GoModParser;
 
+impl Default for GoModParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GoModParser {
     pub fn new() -> Self {
         Self
@@ -140,6 +146,12 @@ impl PackageFileParser for GoModParser {
 
 /// Parser for go.sum files
 pub struct GoSumParser;
+
+impl Default for GoSumParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl GoSumParser {
     pub fn new() -> Self {
