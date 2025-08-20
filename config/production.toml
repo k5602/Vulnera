@@ -4,7 +4,9 @@ port = 3000
 workers = 0
 enable_docs = false
 request_timeout_seconds = 30
-allowed_origins = ["https://app.vulnera.dev"]
+allowed_origins = [
+    "https://vulnera-back.politeisland-d68133bc.switzerlandnorth.azurecontainerapps.io",
+]
 
 [cache]
 ttl_hours = 24
