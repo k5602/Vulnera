@@ -71,6 +71,9 @@ pub enum VulnerabilityError {
 
     #[error("Timeout occurred after {seconds}s")]
     Timeout { seconds: u64 },
+
+    #[error("Domain object creation failed: {message}")]
+    DomainCreation { message: String },
 }
 
 #[derive(Error, Debug)]

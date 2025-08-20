@@ -449,12 +449,14 @@ impl AggregatingVulnerabilityRepository {
                     // Use a placeholder package since we now extract affected packages from the vulnerability data
                     let placeholder_package = Package::new(
                         "placeholder".to_string(),
-                        Version::parse("0.0.0").map_err(|e| VulnerabilityError::RateLimit {
-                            api: format!("Failed to create placeholder package: {}", e),
+                        Version::parse("0.0.0").map_err(|e| VulnerabilityError::DomainCreation {
+                            message: format!("Failed to parse placeholder version: {}", e),
                         })?,
                         crate::domain::Ecosystem::Npm,
                     )
-                    .map_err(|e| VulnerabilityError::RateLimit { api: e })?;
+                    .map_err(|e| VulnerabilityError::DomainCreation { 
+                        message: format!("Failed to create placeholder package: {}", e) 
+                    })?;
 
                     match self.convert_raw_vulnerability(raw_vuln, source.clone(), &placeholder_package) {
                         Ok(vulnerability) => vulnerabilities.push(vulnerability),
