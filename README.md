@@ -100,9 +100,9 @@ It features two automated workflows:
 
 | Step | Description |
 |------|-------------|
-| 1️⃣ Code Commit | Developer pushes changes to GitHub |
-| 2️⃣ Workflow Trigger | `git push` triggers **GitHub Actions** |
-| 3️⃣ Parallel Builds | **Frontend:** Build SPA → Deploy to **Amplify** <br> **Backend:** Build Docker → Push to **ECR** → Update Lambda |
+| 1️⃣  Code Commit | Developer pushes changes to GitHub |
+| 2️⃣  Workflow Trigger | `git push` triggers **GitHub Actions** |
+| 3️⃣  Parallel Builds | **Frontend:** Build SPA → Deploy to **Amplify** <br> **Backend:** Build Docker → Push to **ECR** → Update Lambda |
 
 ---
 
@@ -110,13 +110,13 @@ It features two automated workflows:
 
 | Step | Description |
 |------|-------------|
-| 1️⃣ Initiation | User triggers API call via frontend (Amplify + CloudFront) |
-| 2️⃣ Ingress | HTTPS request → **API Gateway** (auth & security) |
-| 3️⃣ Invocation | Gateway calls **Lambda** function |
-| 4️⃣ Execution | Lambda runs containerized code under **IAM Role** |
-| 5️⃣ Response | JSON response sent back to API Gateway |
-| 6️⃣ Egress | API Gateway → User browser updates UI |
-| 7️⃣ Logging | Metrics & logs streamed to **CloudWatch** |
+| 1️⃣  Initiation | User triggers API call via frontend (Amplify + CloudFront) |
+| 2️⃣  Ingress | HTTPS request → **API Gateway** (auth & security) |
+| 3️⃣  Invocation | Gateway calls **Lambda** function |
+| 4️⃣  Execution | Lambda runs containerized code under **IAM Role** |
+| 5️⃣  Response | JSON response sent back to API Gateway |
+| 6️⃣  Egress | API Gateway → User browser updates UI |
+| 7️⃣  Logging | Metrics & logs streamed to **CloudWatch** |
 
 ---
 
