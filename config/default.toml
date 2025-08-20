@@ -15,11 +15,12 @@ timeout_seconds = 30
 [apis.nvd]
 base_url = "https://services.nvd.nist.gov/rest/json"
 timeout_seconds = 30
-rate_limit_per_30s = 5  # Without API key, 50 with API key
+rate_limit_per_30s = 5                               # Without API key, 50 with API key
 
 [apis.ghsa]
 graphql_url = "https://api.github.com/graphql"
 timeout_seconds = 30
+# token = "your_github_token_here"  # Set via environment variable VULNERA__APIS__GHSA__TOKEN
 
 [logging]
 level = "info"

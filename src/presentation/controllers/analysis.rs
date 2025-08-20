@@ -508,8 +508,7 @@ pub async fn get_analysis_report(
     // Validate pagination parameters
     let (page, per_page) = pagination.validate()?;
 
-    // For now, we'll return a placeholder response since we don't have persistent storage yet
-    // In a real implementation, this would fetch from a database or cache
+    // Retrieve analysis report from the file cache system
     let cache_key = format!("analysis_report:{}", id);
 
     // Try to get cached analysis report

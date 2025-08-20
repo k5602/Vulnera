@@ -49,8 +49,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None, // No API key by default
     ));
     let ghsa_client = Arc::new(GhsaClient::new(
-        "github_token".to_string(), // TODO: Load from config
-        "https://api.github.com/graphql".to_string(),
+        config.apis.ghsa.token.clone().unwrap_or_else(|| {
+            tracing::warn!("No GitHub token configured, GHSA API may have limited functionality");
+            String::new()
+        }),
+        config.apis.ghsa.graphql_url.clone(),
     ));
 
     let vulnerability_repository = Arc::new(AggregatingVulnerabilityRepository::new(
