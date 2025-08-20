@@ -14,6 +14,12 @@ case "$1" in
         echo "VITE_APP_NAME=Vulnera Remote" >> .env
         echo "✅ Switched to remote API (http://18.135.27.89:3000)"
         ;;
+    "azure")
+        echo "VITE_API_BASE_URL=https://vulnera-back.politeisland-d68133bc.switzerlandnorth.azurecontainerapps.io" > .env
+        echo "VITE_API_VERSION=v1" >> .env
+        echo "VITE_APP_NAME=Vulnera Azure" >> .env
+        echo "✅ Switched to Azure API (https://vulnera-back.politeisland-d68133bc.switzerlandnorth.azurecontainerapps.io)"
+        ;;
     "prod"|"production")
         echo "VITE_API_BASE_URL=https://api.vulnera.dev" > .env
         echo "VITE_API_VERSION=v1" >> .env
@@ -37,11 +43,12 @@ case "$1" in
         echo "✅ Switched to custom API (${custom_url})"
         ;;
     *)
-        echo "Usage: $0 {local|remote|production|network|custom}"
+        echo "Usage: $0 {local|remote|azure|production|network|custom}"
         echo ""
         echo "Available options:"
         echo "  local      - http://localhost:3000"
         echo "  remote     - http://18.135.27.89:3000"
+        echo "  azure      - https://vulnera-back.politeisland-d68133bc.switzerlandnorth.azurecontainerapps.io"
         echo "  production - https://api.vulnera.dev"
         echo "  network    - Custom network IP"
         echo "  custom     - Custom URL"
