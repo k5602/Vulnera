@@ -28,7 +28,7 @@ A comprehensive, high-performance vulnerability analysis API built with Rust, de
 
 # 🌐 Vulnera Rust - Azure Architecture Overview
 
-![Architecture Diagram](./Azure2.png)
+![Architecture Diagram](./AWS2.png)
 
 ---
 
