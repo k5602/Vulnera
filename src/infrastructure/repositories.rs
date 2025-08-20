@@ -12,7 +12,7 @@ use super::api_clients::traits::{RawVulnerability, VulnerabilityApiClient};
 use crate::application::errors::VulnerabilityError;
 use crate::domain::{
     AffectedPackage, Package, Severity, Version, VersionRange, Vulnerability, VulnerabilityId,
-    VulnerabilitySource,
+    VulnerabilitySource, Ecosystem,
 };
 
 /// Repository trait for vulnerability data access
@@ -57,7 +57,7 @@ impl AggregatingVulnerabilityRepository {
         &self,
         raw: RawVulnerability,
         source: VulnerabilitySource,
-        package: &Package,
+        _package: &Package, // Keep for interface compatibility but use affected data instead
     ) -> Result<Vulnerability, String> {
         // Parse vulnerability ID
         let vuln_id = VulnerabilityId::new(raw.id.clone())?;
@@ -65,14 +65,108 @@ impl AggregatingVulnerabilityRepository {
         // Parse severity with fallback
         let severity = self.parse_severity(&raw.severity);
 
-        // Create affected package for the queried package
-        // Note: We don't have detailed version range info from raw data,
-        // so we assume the current package version is affected
-        let affected_package = AffectedPackage::new(
-            package.clone(),
-            vec![VersionRange::exact(package.version.clone())],
-            vec![], // No fixed versions available from raw data
-        );
+        // Create affected packages from raw vulnerability data
+        let mut affected_packages = Vec::new();
+        
+        for affected_data in &raw.affected {
+            // Convert ecosystem string to domain enum
+            let ecosystem = match affected_data.package.ecosystem.as_str() {
+                "npm" | "NPM" => Ecosystem::Npm,
+                "PyPI" | "pypi" => Ecosystem::PyPI,
+                "crates.io" => Ecosystem::Cargo,
+                "Go" | "go" => Ecosystem::Go,
+                "Maven" | "maven" => Ecosystem::Maven,
+                "Packagist" | "packagist" => Ecosystem::Packagist,
+                _ => continue, // Skip unknown ecosystems
+            };
+
+            // Parse affected versions and ranges
+            let mut affected_version_ranges = Vec::new();
+            let mut fixed_versions = Vec::new();
+
+            // Process version ranges if available
+            if let Some(ranges) = &affected_data.ranges {
+                for range in ranges {
+                    // Process events to determine version ranges
+                    let mut introduced_version = None;
+                    let mut fixed_version = None;
+
+                    for event in &range.events {
+                        match event.event_type.as_str() {
+                            "introduced" => {
+                                if event.value != "0" {
+                                    introduced_version = Some(event.value.clone());
+                                }
+                            }
+                            "fixed" => {
+                                fixed_version = Some(event.value.clone());
+                                fixed_versions.push(event.value.clone());
+                            }
+                            "last_affected" => {
+                                // Use last_affected as the upper bound
+                            }
+                            _ => {} // Handle other event types as needed
+                        }
+                    }
+
+                    // Create version range based on available data
+                    if let (Some(introduced), Some(fixed)) = (introduced_version.clone(), fixed_version.clone()) {
+                        if let (Ok(intro_ver), Ok(fix_ver)) = (
+                            Version::parse(&introduced),
+                            Version::parse(&fixed),
+                        ) {
+                            affected_version_ranges.push(VersionRange::new(
+                                Some(intro_ver),
+                                Some(fix_ver),
+                                true,  // start inclusive
+                                false, // end exclusive (fixed version not affected)
+                            ));
+                        }
+                    } else if let Some(introduced) = introduced_version {
+                        if let Ok(intro_ver) = Version::parse(&introduced) {
+                            affected_version_ranges.push(VersionRange::at_least(intro_ver));
+                        }
+                    }
+                }
+            }
+
+            // If no ranges but has specific versions, use those
+            if affected_version_ranges.is_empty() {
+                if let Some(versions) = &affected_data.versions {
+                    for version_str in versions {
+                        if let Ok(version) = Version::parse(version_str) {
+                            affected_version_ranges.push(VersionRange::exact(version));
+                        }
+                    }
+                }
+            }
+
+            // Create affected package
+            if !affected_version_ranges.is_empty() {
+                if let Ok(package) = Package::new(
+                    affected_data.package.name.clone(),
+                    Version::parse("0.0.0").unwrap(), // Placeholder version
+                    ecosystem,
+                ) {
+                    let affected_package = AffectedPackage::new(
+                        package,
+                        affected_version_ranges,
+                        fixed_versions.into_iter().filter_map(|v| Version::parse(&v).ok()).collect(),
+                    );
+                    affected_packages.push(affected_package);
+                }
+            }
+        }
+
+        // If no affected packages from data, fall back to queried package
+        if affected_packages.is_empty() {
+            let affected_package = AffectedPackage::new(
+                _package.clone(),
+                vec![VersionRange::exact(_package.version.clone())],
+                vec![], // No fixed versions available from raw data
+            );
+            affected_packages.push(affected_package);
+        }
 
         // Use published_at or current time as fallback
         let published_at = raw.published_at.unwrap_or_else(Utc::now);
@@ -83,7 +177,7 @@ impl AggregatingVulnerabilityRepository {
             raw.summary,
             raw.description,
             severity,
-            vec![affected_package],
+            affected_packages,
             raw.references,
             published_at,
             vec![source],
@@ -346,23 +440,23 @@ impl AggregatingVulnerabilityRepository {
             }
         });
 
-        // Collect results - we need to create a dummy package for conversion
-        // In a real scenario, we'd need to query with the affected packages info
-        let dummy_package = Package::new(
-            "unknown".to_string(),
-            Version::parse("0.0.0").map_err(|e| VulnerabilityError::RateLimit {
-                api: format!("Failed to create dummy package: {}", e),
-            })?,
-            crate::domain::Ecosystem::Npm, // Use Npm as default instead of Other
-        )
-        .map_err(|e| VulnerabilityError::RateLimit { api: e })?;
-
+        // Collect results from all sources
         let mut vulnerabilities = Vec::new();
 
         while let Some(result) = join_set.join_next().await {
             match result {
                 Ok(Ok((Some(raw_vuln), source))) => {
-                    match self.convert_raw_vulnerability(raw_vuln, source.clone(), &dummy_package) {
+                    // Use a placeholder package since we now extract affected packages from the vulnerability data
+                    let placeholder_package = Package::new(
+                        "placeholder".to_string(),
+                        Version::parse("0.0.0").map_err(|e| VulnerabilityError::RateLimit {
+                            api: format!("Failed to create placeholder package: {}", e),
+                        })?,
+                        crate::domain::Ecosystem::Npm,
+                    )
+                    .map_err(|e| VulnerabilityError::RateLimit { api: e })?;
+
+                    match self.convert_raw_vulnerability(raw_vuln, source.clone(), &placeholder_package) {
                         Ok(vulnerability) => vulnerabilities.push(vulnerability),
                         Err(e) => {
                             error!("Failed to convert vulnerability from {:?}: {}", source, e);

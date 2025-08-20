@@ -35,6 +35,36 @@ struct OsvVulnerability {
     severity: Option<Vec<OsvSeverity>>,
     references: Option<Vec<OsvReference>>,
     published: Option<String>,
+    affected: Option<Vec<OsvAffectedPackage>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OsvAffectedPackage {
+    package: OsvPackageInfo,
+    ranges: Option<Vec<OsvVersionRange>>,
+    versions: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OsvPackageInfo {
+    name: String,
+    ecosystem: String,
+    purl: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OsvVersionRange {
+    #[serde(rename = "type")]
+    range_type: String,
+    repo: Option<String>,
+    events: Vec<OsvVersionEvent>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OsvVersionEvent {
+    #[serde(rename = "type")]
+    event_type: String,
+    value: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -115,6 +145,39 @@ impl OsvClient {
             .and_then(|p| chrono::DateTime::parse_from_rfc3339(&p).ok())
             .map(|dt| dt.with_timezone(&chrono::Utc));
 
+        // Convert affected packages
+        let affected = osv_vuln
+            .affected
+            .unwrap_or_default()
+            .into_iter()
+            .map(|osv_affected| {
+                use super::traits::{AffectedPackageData, PackageInfo, VersionRangeData, VersionEventData};
+                
+                AffectedPackageData {
+                    package: PackageInfo {
+                        name: osv_affected.package.name,
+                        ecosystem: osv_affected.package.ecosystem,
+                        purl: osv_affected.package.purl,
+                    },
+                    ranges: osv_affected.ranges.map(|ranges| {
+                        ranges.into_iter().map(|range| {
+                            VersionRangeData {
+                                range_type: range.range_type,
+                                repo: range.repo,
+                                events: range.events.into_iter().map(|event| {
+                                    VersionEventData {
+                                        event_type: event.event_type,
+                                        value: event.value,
+                                    }
+                                }).collect(),
+                            }
+                        }).collect()
+                    }),
+                    versions: osv_affected.versions,
+                }
+            })
+            .collect();
+
         RawVulnerability {
             id: osv_vuln.id,
             summary: osv_vuln.summary.unwrap_or_default(),
@@ -122,6 +185,7 @@ impl OsvClient {
             severity,
             references,
             published_at,
+            affected,
         }
     }
 }

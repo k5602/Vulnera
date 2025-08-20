@@ -33,9 +33,9 @@ struct GraphQLError {
 #[derive(Debug, Deserialize)]
 struct GraphQLLocation {
     #[allow(dead_code)]
-    line: u32,     // Line number in GraphQL query
+    line: u32, // Line number in GraphQL query
     #[allow(dead_code)]
-    column: u32,   // Column number in GraphQL query
+    column: u32, // Column number in GraphQL query
 }
 
 /// Security advisories query response
@@ -100,7 +100,7 @@ struct Vulnerability {
 #[derive(Debug, Deserialize)]
 struct VulnerabilityPackage {
     #[allow(dead_code)]
-    name: String,      // Future: package name processing
+    name: String, // Future: package name processing
     #[allow(dead_code)]
     ecosystem: String, // Future: ecosystem-specific logic
 }
@@ -279,6 +279,7 @@ impl GhsaClient {
             severity: Some(advisory.severity),
             references,
             published_at,
+            affected: vec![], // TODO: Extract affected packages from GHSA data
         }
     }
 

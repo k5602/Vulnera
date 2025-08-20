@@ -125,10 +125,10 @@ struct NvdMetrics {
 #[derive(Debug, Deserialize)]
 struct NvdCvssMetric {
     #[allow(dead_code)]
-    source: String,       // Future: CVSS source tracking
+    source: String, // Future: CVSS source tracking
     #[serde(rename = "type")]
     #[allow(dead_code)]
-    metric_type: String,  // Future: metric type categorization
+    metric_type: String, // Future: metric type categorization
     #[serde(rename = "cvssData")]
     cvss_data: NvdCvssData,
 }
@@ -136,10 +136,10 @@ struct NvdCvssMetric {
 #[derive(Debug, Deserialize)]
 struct NvdCvssMetricV2 {
     #[allow(dead_code)]
-    source: String,       // Future: CVSS source tracking
+    source: String, // Future: CVSS source tracking
     #[serde(rename = "type")]
     #[allow(dead_code)]
-    metric_type: String,  // Future: metric type categorization
+    metric_type: String, // Future: metric type categorization
     #[serde(rename = "cvssData")]
     cvss_data: NvdCvssDataV2,
 }
@@ -147,7 +147,7 @@ struct NvdCvssMetricV2 {
 #[derive(Debug, Deserialize)]
 struct NvdCvssData {
     #[allow(dead_code)]
-    version: String,      // Future: CVSS version handling
+    version: String, // Future: CVSS version handling
     #[serde(rename = "baseScore")]
     base_score: f64,
     #[serde(rename = "baseSeverity")]
@@ -158,7 +158,7 @@ struct NvdCvssData {
 #[derive(Debug, Deserialize)]
 struct NvdCvssDataV2 {
     #[allow(dead_code)]
-    version: String,      // Future: CVSS version handling
+    version: String, // Future: CVSS version handling
     #[serde(rename = "baseScore")]
     base_score: f64,
 }
@@ -393,6 +393,7 @@ impl NvdClient {
             severity,
             references,
             published_at,
+            affected: vec![], // TODO: Extract affected packages from NVD data
         }
     }
 }
