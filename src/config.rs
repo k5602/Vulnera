@@ -18,6 +18,12 @@ pub struct ServerConfig {
     pub host: String,
     pub port: u16,
     pub workers: Option<usize>,
+    /// Whether to expose interactive API docs (Swagger UI). Should be false in hardened production.
+    pub enable_docs: bool,
+    /// Global request timeout in seconds applied at the HTTP layer.
+    pub request_timeout_seconds: u64,
+    /// Allowed CORS origins. Use ["*"] to allow any (development only). Empty vector -> no external origins.
+    pub allowed_origins: Vec<String>,
 }
 
 /// Cache configuration
@@ -73,6 +79,9 @@ impl Default for Config {
                 host: "0.0.0.0".to_string(),
                 port: 3000,
                 workers: None,
+                enable_docs: true,
+                request_timeout_seconds: 30,
+                allowed_origins: vec!["*".to_string()],
             },
             cache: CacheConfig {
                 directory: PathBuf::from(".vulnera_cache"),

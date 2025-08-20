@@ -292,12 +292,36 @@ python vulnerability_analyzer.py requirements.txt
 
 ## Configuration
 
-### Environment Variables
+### Environment Profiles & Variables
+
+The application supports three environment profiles selected via the `ENV` variable: `development`, `staging`, and `production`.
+
+Profile goals:
+
+- Development: fast iteration, verbose logs, docs enabled, permissive CORS.
+- Staging: mirrors production with docs enabled for QA, restricted CORS.
+- Production: hardened; Swagger UI disabled (unless explicitly enabled), strict CORS, lean logging.
+
+Configuration files loaded in order (later overrides earlier):
+1. `config/default.toml`
+2. `config/local.toml` (optional, git-ignored)
+3. `config/{ENV}.toml` if `ENV` is set
+4. Environment variables with prefix `VULNERA__` (highest precedence)
+
+Key new server fields:
+- `enable_docs` (bool): Expose Swagger UI at `/docs` when true.
+- `request_timeout_seconds` (u64): Global per-request timeout.
+- `allowed_origins` (array): CORS origins (use `[*]` only in development).
 
 ```bash
 # Server Configuration
 VULNERA__SERVER__HOST=0.0.0.0
 VULNERA__SERVER__PORT=3000
+# Disable docs in production explicitly (default in production.toml is false)
+VULNERA__SERVER__ENABLE_DOCS=false
+# Override timeout if needed
+VULNERA__SERVER__REQUEST_TIMEOUT_SECONDS=45
+# Comma separated is not supported; set via config file for multiple origins
 
 # Cache Configuration
 VULNERA__CACHE__DIRECTORY=.vulnera_cache
@@ -311,7 +335,7 @@ VULNERA__APIS__GHSA__TOKEN=your_github_token_here
 VULNERA__LOGGING__LEVEL=info
 VULNERA__LOGGING__FORMAT=json
 
-# Environment
+# Select profile
 ENV=production
 ```
 

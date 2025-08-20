@@ -17,7 +17,6 @@ struct_lit_single_line = true
 fn_single_line = false
 where_single_line = false
 imports_layout = "Mixed"
-merge_imports = false
 group_imports = "StdExternalCrate"
 fn_args_layout = "Tall"
 brace_style = "SameLineWhere"

@@ -55,13 +55,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Create router
-    let app = create_router(app_state);
+    let app = create_router(app_state, &config);
 
     // Create server address
     let addr = SocketAddr::new(config.server.host.parse()?, config.server.port);
 
     tracing::info!("Server listening on {}", addr);
-    tracing::info!("API documentation available at http://{}/docs", addr);
+    if config.server.enable_docs {
+        tracing::info!("API documentation available at http://{}/docs", addr);
+    } else {
+        tracing::info!("API documentation disabled (enable_docs=false)");
+    }
 
     // Start server with graceful shutdown
     let listener = TcpListener::bind(addr).await?;

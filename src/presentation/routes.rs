@@ -1,5 +1,6 @@
 //! Route definitions and server setup
 
+use crate::Config;
 use axum::{
     Router, middleware,
     routing::{get, post},
@@ -91,7 +92,7 @@ use axum::{
 pub struct ApiDoc;
 
 /// Create the application router with comprehensive middleware stack
-pub fn create_router(app_state: AppState) -> Router {
+pub fn create_router(app_state: AppState, config: &Config) -> Router {
     let api_routes = Router::new()
         .route("/analyze", post(analyze_dependencies))
         .route("/vulnerabilities", get(list_vulnerabilities))
@@ -106,8 +107,24 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/metrics", get(metrics));
 
     // Create CORS layer with proper configuration
-    let cors_layer = CorsLayer::new()
-        .allow_origin(Any)
+    // Build CORS layer from configuration
+    let cors_layer =
+        if config.server.allowed_origins.len() == 1 && config.server.allowed_origins[0] == "*" {
+            CorsLayer::new().allow_origin(Any)
+        } else {
+            let mut layer = CorsLayer::new();
+            for origin in &config.server.allowed_origins {
+                match axum::http::HeaderValue::from_str(origin) {
+                    Ok(origin_header) => {
+                        layer = layer.allow_origin(origin_header);
+                    }
+                    Err(_) => {
+                        tracing::warn!(origin, "Invalid CORS origin in config; skipping");
+                    }
+                }
+            }
+            layer
+        }
         .allow_methods([
             axum::http::Method::GET,
             axum::http::Method::POST,
@@ -121,11 +138,17 @@ pub fn create_router(app_state: AppState) -> Router {
             axum::http::header::ACCEPT,
         ])
         .max_age(Duration::from_secs(3600));
-
-    Router::new()
+    let mut router = Router::new()
         .nest("/api/v1", api_routes)
-        .merge(health_routes)
-        .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi()))
+        .merge(health_routes);
+
+    // Conditionally expose Swagger UI based on configuration (avoid leaking docs in production).
+    if config.server.enable_docs {
+        router =
+            router.merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi()));
+    }
+
+    router
         // Serve documentation resources
         .route("/docs/examples", get(serve_api_examples))
         .route("/docs/versioning", get(serve_versioning_info))
@@ -136,7 +159,9 @@ pub fn create_router(app_state: AppState) -> Router {
                 // CORS handling
                 .layer(cors_layer)
                 // Request timeout (30 seconds)
-                .layer(TimeoutLayer::new(Duration::from_secs(30)))
+                .layer(TimeoutLayer::new(Duration::from_secs(
+                    config.server.request_timeout_seconds,
+                )))
                 // Custom logging middleware
                 .layer(middleware::from_fn(logging_middleware)),
         )
