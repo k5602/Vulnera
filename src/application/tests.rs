@@ -413,7 +413,7 @@ async fn test_analysis_service_vulnerability_not_found() {
             assert_eq!(resource, "vulnerability");
             assert_eq!(id, "CVE-2022-99999");
         }
-        _ => panic!("Expected NotFound error"),
+        other => panic!("Expected NotFound error, got: {:?}", other),
     }
 }
 

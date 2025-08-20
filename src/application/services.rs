@@ -916,8 +916,9 @@ impl<C: CacheService> AnalysisService for AnalysisServiceImpl<C> {
             .get_vulnerability_by_id(vulnerability_id)
             .await
             .map_err(ApplicationError::Vulnerability)?
-            .ok_or_else(|| ApplicationError::Configuration {
-                message: format!("Vulnerability not found: {}", vulnerability_id.as_str()),
+            .ok_or_else(|| ApplicationError::NotFound {
+                resource: "vulnerability".to_string(),
+                id: vulnerability_id.as_str().to_string(),
             })?;
 
         // Cache for 24 hours
