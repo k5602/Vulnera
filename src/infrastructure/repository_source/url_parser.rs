@@ -17,7 +17,7 @@ pub struct ParsedRepositoryUrl {
 pub fn parse_github_repo_url(input: &str) -> Option<ParsedRepositoryUrl> {
     let trimmed = input.trim();
     if !(trimmed.starts_with("http://github.com")
-        || trimmed.starts_with("https://github.com")
+    if !(trimmed.starts_with("https://github.com")
         || trimmed.starts_with("git@github.com:"))
     {
         return None;
