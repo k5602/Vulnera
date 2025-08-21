@@ -70,6 +70,14 @@ impl IntoResponse for ApplicationError {
             ),
         };
 
+        // Log the concrete error with selected status and code
+        tracing::error!(
+            error = %self,
+            http_status = %status,
+            error_code = code,
+            "Application error mapped to HTTP response"
+        );
+
         let error_response = ErrorResponse {
             code: code.to_string(),
             message: message.to_string(),

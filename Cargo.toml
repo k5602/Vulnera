@@ -58,6 +58,7 @@ regex = "1.11.1"
 semver = { version = "1.0", features = ["serde"] }
 octocrab = { version = "0.44" }
 base64 = "0.22"
+percent-encoding = "2.3"
 
 [dev-dependencies]
 tempfile = "3.21.0"

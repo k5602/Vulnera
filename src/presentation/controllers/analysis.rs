@@ -152,23 +152,26 @@ pub async fn analyze_repository(
         if let Some(parsed) = crate::infrastructure::repository_source::parse_github_repo_url(url) {
             (parsed.owner, parsed.repo, parsed.r#ref)
         } else {
-            return Err(ApplicationError::Configuration {
-                message: "Invalid repository_url".into(),
-            });
+            return Err(ApplicationError::Domain(
+                crate::domain::DomainError::InvalidInput {
+                    field: "repository_url".into(),
+                    message: "Invalid GitHub repository URL".into(),
+                },
+            ));
         }
     } else {
-        let owner = request
-            .owner
-            .clone()
-            .ok_or_else(|| ApplicationError::Configuration {
-                message: "owner required".into(),
-            })?;
-        let repo = request
-            .repo
-            .clone()
-            .ok_or_else(|| ApplicationError::Configuration {
-                message: "repo required".into(),
-            })?;
+        let owner = request.owner.clone().ok_or_else(|| {
+            ApplicationError::Domain(crate::domain::DomainError::InvalidInput {
+                field: "owner".into(),
+                message: "owner is required".into(),
+            })
+        })?;
+        let repo = request.repo.clone().ok_or_else(|| {
+            ApplicationError::Domain(crate::domain::DomainError::InvalidInput {
+                field: "repo".into(),
+                message: "repo is required".into(),
+            })
+        })?;
         (owner, repo, None)
     };
 
@@ -185,7 +188,20 @@ pub async fn analyze_repository(
         return_packages: request.return_packages.unwrap_or(false),
     };
 
-    let result = service.analyze_repository(input).await?;
+    let result = match service.analyze_repository(input).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                owner = request.owner.as_deref().unwrap_or(""),
+                repo = request.repo.as_deref().unwrap_or(""),
+                repo_url = request.repository_url.as_deref().unwrap_or(""),
+                r#ref = request.r#ref.as_deref().unwrap_or(""),
+                "Repository analysis failed"
+            );
+            return Err(e);
+        }
+    };
 
     let files: Vec<RepositoryFileResultDto> = result
         .files

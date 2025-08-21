@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use base64::Engine;
 use octocrab::Octocrab;
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::{sync::Semaphore, task::JoinSet};
@@ -45,8 +46,13 @@ impl GitHubRepositoryClient {
     ) -> Result<Self, RepositorySourceError> {
         let mut builder = Octocrab::builder();
         if let Some(url) = &base_url {
+            // Ensure base URL has a trailing slash to make relative path joins valid
+            let mut normalized = url.trim().to_string();
+            if !normalized.ends_with('/') {
+                normalized.push('/');
+            }
             builder = builder
-                .base_uri(url)
+                .base_uri(&normalized)
                 .map_err(|e| RepositorySourceError::Configuration(e.to_string()))?;
         }
         if let Some(t) = token {
@@ -94,7 +100,7 @@ impl RepositorySourceClient for GitHubRepositoryClient {
         } else {
             let repo_info: Value = self
                 .octo
-                .get(format!("repos/{}/{}", owner, repo), None::<&()>)
+                .get(format!("/repos/{}/{}", owner, repo), None::<&()>)
                 .await
                 .map_err(classify_octocrab_error)?;
             repo_info
@@ -105,7 +111,12 @@ impl RepositorySourceClient for GitHubRepositoryClient {
         };
 
         // Use git trees API (recursive)
-        let path = format!("repos/{}/{}/git/trees/{}", owner, repo, reference);
+        let path = format!(
+            "/repos/{}/{}/git/trees/{}",
+            owner,
+            repo,
+            encode_path_segment(&reference)
+        );
         let resp: Value = self
             .octo
             .get(path, Some(&[("recursive", "1")]))
@@ -160,21 +171,31 @@ impl RepositorySourceClient for GitHubRepositoryClient {
         let mut join_set: JoinSet<(String, Result<Option<String>, RepositorySourceError>)> =
             JoinSet::new();
 
+        // Clone ref once for move into tasks
+        let ref_opt: Option<String> = r#ref.map(|s| s.to_string());
+
         for file in files.iter() {
             let permit = semaphore.clone().acquire_owned().await.expect("semaphore");
             let octo = self.octo.clone();
             let path_string = file.path.clone();
-            let mut req_path = format!("repos/{}/{}/contents/{}", owner, repo, path_string);
-            if let Some(r) = r#ref {
-                req_path.push_str(&format!("?ref={}", r));
-            }
+            // Percent-encode each path segment to build a valid URI
+            let encoded_path = encode_path(&path_string);
+            let req_path = format!("/repos/{}/{}/contents/{}", owner, repo, encoded_path);
+            // Prepare optional query params for ref without embedding in path
+            let ref_param = ref_opt.clone();
             join_set.spawn(async move {
                 let _p = permit; // hold permit until task ends
                 let res: Result<Option<String>, RepositorySourceError> = async {
-                    let content_json: Value = octo
-                        .get(req_path, None::<&()>)
-                        .await
-                        .map_err(classify_octocrab_error)?;
+                    let content_json: Value = if let Some(r) = ref_param.as_ref() {
+                        let params = serde_json::json!({ "ref": r });
+                        octo.get(req_path.clone(), Some(&params))
+                            .await
+                            .map_err(classify_octocrab_error)?
+                    } else {
+                        octo.get(req_path.clone(), None::<&()>)
+                            .await
+                            .map_err(classify_octocrab_error)?
+                    };
                     if let Some(encoded) = content_json.get("content").and_then(|v| v.as_str()) {
                         let cleaned: String =
                             encoded.chars().filter(|c| !c.is_whitespace()).collect();
@@ -249,4 +270,17 @@ fn classify_octocrab_error(e: octocrab::Error) -> RepositorySourceError {
         return RepositorySourceError::Validation(msg);
     }
     RepositorySourceError::Network(msg)
+}
+
+/// Percent-encode each path segment of a repository file path, preserving '/'
+fn encode_path(path: &str) -> String {
+    path.split('/')
+        .map(|seg| utf8_percent_encode(seg, NON_ALPHANUMERIC).to_string())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Percent-encode a single path segment (e.g., branch/ref names)
+fn encode_path_segment(segment: &str) -> String {
+    utf8_percent_encode(segment, NON_ALPHANUMERIC).to_string()
 }
