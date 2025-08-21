@@ -13,7 +13,7 @@ use vulnera_rust::{
         cache::file_cache::FileCacheRepository,
         parsers::ParserFactory,
         repositories::AggregatingVulnerabilityRepository,
-        repository_source::{GitHubRepositoryClient, RepositorySourceClient},
+        repository_source::GitHubRepositoryClient,
     },
     init_tracing,
     presentation::{AppState, create_router},

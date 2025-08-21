@@ -97,7 +97,10 @@ pub struct ApiDoc;
 pub fn create_router(app_state: AppState, config: &Config) -> Router {
     let api_routes = Router::new()
         .route("/analyze", post(analyze_dependencies))
-    .route("/analyze/repository", post(crate::presentation::controllers::analysis::analyze_repository))
+        .route(
+            "/analyze/repository",
+            post(crate::presentation::controllers::analysis::analyze_repository),
+        )
         .route("/vulnerabilities", get(list_vulnerabilities))
         .route(
             "/vulnerabilities/refresh-cache",

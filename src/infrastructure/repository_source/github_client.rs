@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use base64::Engine;
 use octocrab::Octocrab;
 use serde_json::Value;
-use tracing::{debug, instrument};
+use std::sync::Arc;
+use tokio::{sync::Semaphore, task::JoinSet};
+use tracing::{debug, instrument, warn};
 
 use super::{
     FetchedFileContent, RepositoryFile, RepositorySourceClient, RepositorySourceError,
@@ -12,6 +14,7 @@ use super::{
 };
 
 /// GitHub repository client (initial stub)
+#[allow(dead_code)]
 pub struct GitHubRepositoryClient {
     octo: Octocrab,
     base_url: String,
@@ -124,40 +127,92 @@ impl RepositorySourceClient for GitHubRepositoryClient {
         files: &[RepositoryFile],
         r#ref: Option<&str>,
         _single_file_max_bytes: u64,
-        _concurrent_limit: usize,
+        concurrent_limit: usize,
     ) -> RepositorySourceResult<Vec<FetchedFileContent>> {
         debug!(
             owner,
             repo,
             file_count = files.len(),
             ?r#ref,
+            concurrent_limit,
             "fetch_file_contents start"
         );
-        let mut results = Vec::with_capacity(files.len());
-        for file in files {
-            let path = format!("repos/{}/{}/contents/{}", owner, repo, file.path);
-            let content_json: Value = self
-                .octo
-                .get(path, None::<&()>)
-                .await
-                .map_err(|e| RepositorySourceError::Network(e.to_string()))?;
-            if let Some(encoded) = content_json.get("content").and_then(|v| v.as_str()) {
-                // GitHub returns base64 with newlines
-                let cleaned: String = encoded.chars().filter(|c| !c.is_whitespace()).collect();
-                let engine = base64::engine::general_purpose::STANDARD;
-                match engine.decode(cleaned.as_bytes()) {
-                    Ok(bytes) => {
-                        if let Ok(text) = String::from_utf8(bytes) {
-                            results.push(FetchedFileContent {
-                                path: file.path.clone(),
-                                content: text,
-                            });
+        if files.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let semaphore = Arc::new(Semaphore::new(concurrent_limit.max(1)));
+        let mut join_set: JoinSet<(String, Result<Option<String>, RepositorySourceError>)> =
+            JoinSet::new();
+
+        for file in files.iter() {
+            let permit = semaphore.clone().acquire_owned().await.expect("semaphore");
+            let octo = self.octo.clone();
+            let path_string = file.path.clone();
+            let req_path = format!("repos/{}/{}/contents/{}", owner, repo, path_string);
+            join_set.spawn(async move {
+                let _p = permit; // hold permit until task ends
+                let res: Result<Option<String>, RepositorySourceError> = async {
+                    let content_json: Value = octo
+                        .get(req_path, None::<&()>)
+                        .await
+                        .map_err(classify_octocrab_error)?;
+                    if let Some(encoded) = content_json.get("content").and_then(|v| v.as_str()) {
+                        let cleaned: String =
+                            encoded.chars().filter(|c| !c.is_whitespace()).collect();
+                        let engine = base64::engine::general_purpose::STANDARD;
+                        match engine.decode(cleaned.as_bytes()) {
+                            Ok(bytes) => {
+                                if let Ok(text) = String::from_utf8(bytes) {
+                                    return Ok(Some(text));
+                                }
+                            }
+                            Err(e) => debug!(error=?e, file=%path_string, "base64 decode failed"),
                         }
                     }
-                    Err(e) => debug!(error=?e, file=%file.path, "base64 decode failed"),
+                    Ok(None)
                 }
+                .await;
+                (path_string, res)
+            });
+        }
+
+        let mut results = Vec::with_capacity(files.len());
+        while let Some(res) = join_set.join_next().await {
+            match res {
+                Ok((path, Ok(Some(content)))) => results.push(FetchedFileContent { path, content }),
+                Ok((_path, Ok(None))) => {}
+                Ok((path, Err(e))) => match e {
+                    RepositorySourceError::RateLimited {
+                        retry_after,
+                        message,
+                    } => {
+                        warn!(file=%path, ?retry_after, %message, "rate limited fetching file");
+                        return Err(RepositorySourceError::RateLimited {
+                            retry_after,
+                            message,
+                        });
+                    }
+                    other => {
+                        debug!(file=%path, error=?other, "file fetch error");
+                    }
+                },
+                Err(join_err) => debug!(error=%join_err, "join error during fetch"),
             }
         }
+
         Ok(results)
     }
+}
+
+fn classify_octocrab_error(e: octocrab::Error) -> RepositorySourceError {
+    // crude rate limit detection
+    let msg = e.to_string();
+    if msg.contains("rate limit exceeded") || msg.contains("API rate limit exceeded") {
+        return RepositorySourceError::RateLimited {
+            retry_after: None,
+            message: msg,
+        };
+    }
+    RepositorySourceError::Network(msg)
 }

@@ -187,7 +187,7 @@ where
             if f.size > self.config.apis.github.max_single_file_bytes {
                 continue; // skip oversized file
             }
-            if let Some(_) = self.parser_factory.create_parser(&f.path) {
+            if self.parser_factory.create_parser(&f.path).is_some() {
                 if total_bytes + f.size > self.config.apis.github.max_total_bytes {
                     break; // enforce total bytes cap
                 }
