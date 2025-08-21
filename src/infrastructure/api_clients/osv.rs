@@ -62,9 +62,8 @@ struct OsvVersionRange {
 
 #[derive(Debug, Deserialize)]
 struct OsvVersionEvent {
-    #[serde(rename = "type")]
-    event_type: String,
-    value: String,
+    #[serde(flatten)]
+    event: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -170,9 +169,10 @@ impl OsvClient {
                                 events: range
                                     .events
                                     .into_iter()
-                                    .map(|event| VersionEventData {
-                                        event_type: event.event_type,
-                                        value: event.value,
+                                    .flat_map(|event| {
+                                        event.event.into_iter().map(|(event_type, value)| {
+                                            VersionEventData { event_type, value }
+                                        })
                                     })
                                     .collect(),
                             })

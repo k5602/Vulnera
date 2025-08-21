@@ -115,7 +115,26 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
     // Build CORS layer from configuration
     let cors_layer =
         if config.server.allowed_origins.len() == 1 && config.server.allowed_origins[0] == "*" {
-            CorsLayer::new().allow_origin(Any)
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods([
+                    axum::http::Method::GET,
+                    axum::http::Method::POST,
+                    axum::http::Method::PUT,
+                    axum::http::Method::DELETE,
+                    axum::http::Method::OPTIONS,
+                ])
+                .allow_headers([
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::header::AUTHORIZATION,
+                    axum::http::header::ACCEPT,
+                    axum::http::header::USER_AGENT,
+                    axum::http::header::ORIGIN,
+                    axum::http::header::ACCESS_CONTROL_REQUEST_METHOD,
+                    axum::http::header::ACCESS_CONTROL_REQUEST_HEADERS,
+                ])
+                .allow_credentials(false)
+                .max_age(Duration::from_secs(3600))
         } else {
             let mut layer = CorsLayer::new();
             for origin in &config.server.allowed_origins {
@@ -129,20 +148,25 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
                 }
             }
             layer
-        }
-        .allow_methods([
-            axum::http::Method::GET,
-            axum::http::Method::POST,
-            axum::http::Method::PUT,
-            axum::http::Method::DELETE,
-            axum::http::Method::OPTIONS,
-        ])
-        .allow_headers([
-            axum::http::header::CONTENT_TYPE,
-            axum::http::header::AUTHORIZATION,
-            axum::http::header::ACCEPT,
-        ])
-        .max_age(Duration::from_secs(3600));
+                .allow_methods([
+                    axum::http::Method::GET,
+                    axum::http::Method::POST,
+                    axum::http::Method::PUT,
+                    axum::http::Method::DELETE,
+                    axum::http::Method::OPTIONS,
+                ])
+                .allow_headers([
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::header::AUTHORIZATION,
+                    axum::http::header::ACCEPT,
+                    axum::http::header::USER_AGENT,
+                    axum::http::header::ORIGIN,
+                    axum::http::header::ACCESS_CONTROL_REQUEST_METHOD,
+                    axum::http::header::ACCESS_CONTROL_REQUEST_HEADERS,
+                ])
+                .allow_credentials(false)
+                .max_age(Duration::from_secs(3600))
+        };
     let mut router = Router::new()
         .nest("/api/v1", api_routes)
         .merge(health_routes);
