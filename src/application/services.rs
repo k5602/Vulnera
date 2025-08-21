@@ -159,8 +159,27 @@ where
                 self.config.apis.github.max_total_bytes,
             )
             .await
-            .map_err(|e| ApplicationError::Configuration {
-                message: format!("repository source error: {e}"),
+            .map_err(|e| match e {
+                crate::infrastructure::repository_source::RepositorySourceError::NotFound(_)
+                | crate::infrastructure::repository_source::RepositorySourceError::AccessDenied(
+                    _,
+                ) => ApplicationError::NotFound {
+                    resource: "repository".to_string(),
+                    id: format!("{}/{}", &input.owner, &input.repo),
+                },
+                crate::infrastructure::repository_source::RepositorySourceError::RateLimited {
+                    message,
+                    ..
+                } => ApplicationError::RateLimited { message },
+                crate::infrastructure::repository_source::RepositorySourceError::Validation(
+                    msg,
+                ) => ApplicationError::Domain(crate::domain::DomainError::InvalidInput {
+                    field: "ref".into(),
+                    message: msg,
+                }),
+                other => ApplicationError::Configuration {
+                    message: format!("repository source error: {}", other),
+                },
             })?;
         // Apply include/exclude filters
         let filtered: Vec<_> = files
@@ -209,9 +228,19 @@ where
                     self.config.apis.github.max_single_file_bytes,
                     self.config.apis.github.max_concurrent_file_fetches,
                 )
-                .await
-                .map_err(|e| ApplicationError::Configuration {
-                    message: format!("repository source error: {e}"),
+        .await
+        .map_err(|e| match e {
+                    crate::infrastructure::repository_source::RepositorySourceError::RateLimited { .. } => {
+            ApplicationError::RateLimited { message: e.to_string() }
+                    }
+                    crate::infrastructure::repository_source::RepositorySourceError::NotFound(_) |
+                    crate::infrastructure::repository_source::RepositorySourceError::AccessDenied(_) => {
+                        ApplicationError::NotFound { resource: "file contents".into(), id: format!("{}/{}", &input.owner, &input.repo) }
+                    }
+                    crate::infrastructure::repository_source::RepositorySourceError::Validation(msg) => {
+                        ApplicationError::Domain(crate::domain::DomainError::InvalidInput { field: "ref".into(), message: msg })
+                    }
+                    other => ApplicationError::Configuration { message: format!("repository source error: {}", other) },
                 })?
         };
 
@@ -287,7 +316,7 @@ where
             owner: input.owner.clone(),
             repo: input.repo.clone(),
             requested_ref: input.requested_ref.clone(),
-            commit_sha: input.commit_sha.clone(),
+            commit_sha: input.requested_ref.clone().unwrap_or_default(),
             files: parsed_files,
             vulnerabilities: all_vulns.clone(),
             severity_breakdown,

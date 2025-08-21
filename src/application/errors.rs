@@ -35,6 +35,9 @@ pub enum ApplicationError {
 
     #[error("Resource not found: {resource} with id {id}")]
     NotFound { resource: String, id: String },
+
+    #[error("Rate limited: {message}")]
+    RateLimited { message: String },
 }
 
 #[derive(Error, Debug)]

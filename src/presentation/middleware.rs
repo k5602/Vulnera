@@ -22,6 +22,16 @@ impl IntoResponse for ApplicationError {
         let sanitize_errors = std::env::var("ENV").unwrap_or_default() == "production";
 
         let (status, code, message) = match self {
+            ApplicationError::Domain(_) => (
+                StatusCode::BAD_REQUEST,
+                "DOMAIN_ERROR",
+                "Invalid input provided",
+            ),
+            ApplicationError::RateLimited { .. } => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "RATE_LIMITED",
+                "Upstream rate limit exceeded. Please retry later.",
+            ),
             ApplicationError::Parse(_) => (
                 StatusCode::BAD_REQUEST,
                 "PARSE_ERROR",

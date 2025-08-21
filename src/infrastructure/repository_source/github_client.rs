@@ -50,7 +50,9 @@ impl GitHubRepositoryClient {
                 .map_err(|e| RepositorySourceError::Configuration(e.to_string()))?;
         }
         if let Some(t) = token {
-            builder = builder.personal_token(t);
+            if !t.trim().is_empty() {
+                builder = builder.personal_token(t);
+            }
         }
         let octo = match builder.build() {
             Ok(o) => o,
@@ -85,17 +87,30 @@ impl RepositorySourceClient for GitHubRepositoryClient {
             max_files,
             "list_repository_files start"
         );
-        let reference = r#ref.unwrap_or("HEAD");
+
+        // Resolve reference: use provided ref or fetch repository default branch
+        let reference = if let Some(r) = r#ref {
+            r.to_string()
+        } else {
+            let repo_info: Value = self
+                .octo
+                .get(format!("repos/{}/{}", owner, repo), None::<&()>)
+                .await
+                .map_err(classify_octocrab_error)?;
+            repo_info
+                .get("default_branch")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| RepositorySourceError::Validation("missing default_branch".into()))?
+                .to_string()
+        };
+
         // Use git trees API (recursive)
-        let path = format!(
-            "repos/{}/{}/git/trees/{}?recursive=1",
-            owner, repo, reference
-        );
+        let path = format!("repos/{}/{}/git/trees/{}", owner, repo, reference);
         let resp: Value = self
             .octo
-            .get(path, None::<&()>)
+            .get(path, Some(&[("recursive", "1")]))
             .await
-            .map_err(|e| RepositorySourceError::Network(e.to_string()))?;
+            .map_err(classify_octocrab_error)?;
         let mut files = Vec::new();
         if let Some(entries) = resp.get("tree").and_then(|t| t.as_array()) {
             for entry in entries {
@@ -149,7 +164,10 @@ impl RepositorySourceClient for GitHubRepositoryClient {
             let permit = semaphore.clone().acquire_owned().await.expect("semaphore");
             let octo = self.octo.clone();
             let path_string = file.path.clone();
-            let req_path = format!("repos/{}/{}/contents/{}", owner, repo, path_string);
+            let mut req_path = format!("repos/{}/{}/contents/{}", owner, repo, path_string);
+            if let Some(r) = r#ref {
+                req_path.push_str(&format!("?ref={}", r));
+            }
             join_set.spawn(async move {
                 let _p = permit; // hold permit until task ends
                 let res: Result<Option<String>, RepositorySourceError> = async {
@@ -206,13 +224,29 @@ impl RepositorySourceClient for GitHubRepositoryClient {
 }
 
 fn classify_octocrab_error(e: octocrab::Error) -> RepositorySourceError {
-    // crude rate limit detection
+    // Improve classification using message heuristics; fall back to Network
     let msg = e.to_string();
-    if msg.contains("rate limit exceeded") || msg.contains("API rate limit exceeded") {
+    let lower = msg.to_lowercase();
+    if lower.contains("rate limit exceeded") || lower.contains("api rate limit exceeded") {
         return RepositorySourceError::RateLimited {
             retry_after: None,
             message: msg,
         };
+    }
+    if lower.contains("not found") || lower.contains("404") {
+        return RepositorySourceError::NotFound(msg);
+    }
+    if lower.contains("forbidden")
+        || lower.contains("requires authentication")
+        || lower.contains("unauthorized")
+        || lower.contains("bad credentials")
+        || lower.contains("401")
+        || lower.contains("403")
+    {
+        return RepositorySourceError::AccessDenied(msg);
+    }
+    if lower.contains("unprocessable entity") || lower.contains("422") {
+        return RepositorySourceError::Validation(msg);
     }
     RepositorySourceError::Network(msg)
 }
