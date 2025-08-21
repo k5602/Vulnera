@@ -1,7 +1,6 @@
 //! Application services for orchestrating business logic
 
 use async_trait::async_trait;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::task::JoinSet;
 use tracing::{debug, error, info, warn};
@@ -44,6 +43,144 @@ pub struct PackageSummary {
     pub vulnerability_count: usize,
     pub highest_severity: crate::domain::Severity,
     pub vulnerabilities: Vec<VulnerabilityId>,
+}
+
+// -------------------------------------------------------------------------------------------------
+// Repository Analysis (GitHub) - Service Trait & Data Structures (initial scaffold)
+// -------------------------------------------------------------------------------------------------
+
+/// Input for analyzing a repository (already validated & parsed from request/URL)
+#[derive(Debug, Clone)]
+pub struct RepositoryAnalysisInput {
+    pub owner: String,
+    pub repo: String,
+    pub requested_ref: Option<String>,
+    pub include_paths: Option<Vec<String>>,
+    pub exclude_paths: Option<Vec<String>>,
+    pub max_files: u32,
+    pub include_lockfiles: bool,
+    pub return_packages: bool,
+}
+
+/// Repository analysis file result (internal)
+#[derive(Debug, Clone)]
+pub struct RepositoryFileResultInternal {
+    pub path: String,
+    pub ecosystem: Option<Ecosystem>,
+    pub packages: Vec<Package>,
+    pub error: Option<String>,
+}
+
+/// Repository analysis aggregate result (internal) - transformed to DTO in controller
+#[derive(Debug, Clone)]
+pub struct RepositoryAnalysisInternalResult {
+    pub id: uuid::Uuid,
+    pub owner: String,
+    pub repo: String,
+    pub requested_ref: Option<String>,
+    pub commit_sha: String,
+    pub files: Vec<RepositoryFileResultInternal>,
+    pub vulnerabilities: Vec<Vulnerability>,
+    pub severity_breakdown: crate::domain::SeverityBreakdown,
+    pub total_files_scanned: u32,
+    pub analyzed_files: u32,
+    pub skipped_files: u32,
+    pub unique_packages: u32,
+    pub duration: std::time::Duration,
+    pub file_errors: u32,
+    pub rate_limit_remaining: Option<u32>,
+    pub truncated: bool,
+}
+
+/// Repository analysis service trait
+#[async_trait]
+pub trait RepositoryAnalysisService: Send + Sync {
+    async fn analyze_repository(
+        &self,
+        input: RepositoryAnalysisInput,
+    ) -> Result<RepositoryAnalysisInternalResult, ApplicationError>;
+}
+
+use crate::infrastructure::ParserFactory;
+use crate::infrastructure::repository_source::RepositorySourceClient;
+use std::sync::Arc;
+
+/// Initial scaffold implementation (logic will be filled in subsequent commits)
+pub struct RepositoryAnalysisServiceImpl<
+    C: RepositorySourceClient,
+    R: VulnerabilityRepository + 'static,
+> {
+    source_client: Arc<C>,
+    vuln_repo: Arc<R>,
+    parser_factory: Arc<ParserFactory>,
+}
+
+impl<C: RepositorySourceClient, R: VulnerabilityRepository> RepositoryAnalysisServiceImpl<C, R> {
+    pub fn new(
+        source_client: Arc<C>,
+        vuln_repo: Arc<R>,
+        parser_factory: Arc<ParserFactory>,
+    ) -> Self {
+        Self {
+            source_client,
+            vuln_repo,
+            parser_factory,
+        }
+    }
+}
+
+#[async_trait]
+impl<C, R> RepositoryAnalysisService for RepositoryAnalysisServiceImpl<C, R>
+where
+    C: RepositorySourceClient + 'static,
+    R: VulnerabilityRepository + 'static,
+{
+    #[tracing::instrument(skip(self, input))]
+    async fn analyze_repository(
+        &self,
+        input: RepositoryAnalysisInput,
+    ) -> Result<RepositoryAnalysisInternalResult, ApplicationError> {
+        let start = std::time::Instant::now();
+        // Outline only (detailed implementation later)
+        let files = match self
+            .source_client
+            .list_repository_files(
+                &input.owner,
+                &input.repo,
+                input.requested_ref.as_deref(),
+                input.max_files,
+                5_000_000,
+            )
+            .await
+        {
+            Ok(f) => f,
+            Err(e) => {
+                return Err(ApplicationError::Configuration {
+                    message: format!("repository source error: {e}"),
+                });
+            }
+        };
+
+        let internal = RepositoryAnalysisInternalResult {
+            id: uuid::Uuid::new_v4(),
+            owner: input.owner.clone(),
+            repo: input.repo.clone(),
+            requested_ref: input.requested_ref.clone(),
+            commit_sha: "".into(),
+            files: vec![],
+            vulnerabilities: vec![],
+            severity_breakdown: crate::domain::SeverityBreakdown::from_vulnerabilities(&[]),
+            total_files_scanned: files.len() as u32,
+            analyzed_files: 0,
+            skipped_files: 0,
+            unique_packages: 0,
+            duration: start.elapsed(),
+            file_errors: 0,
+            rate_limit_remaining: None,
+            truncated: false,
+        };
+        Ok(internal)
+    }
 }
 
 /// Service for orchestrating vulnerability analysis

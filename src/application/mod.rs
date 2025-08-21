@@ -13,3 +13,4 @@ mod tests;
 pub use errors::*;
 pub use services::*;
 pub use use_cases::*;
+pub use services::{RepositoryAnalysisService, RepositoryAnalysisInput};

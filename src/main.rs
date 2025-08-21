@@ -13,6 +13,7 @@ use vulnera_rust::{
         cache::file_cache::FileCacheRepository,
         parsers::ParserFactory,
         repositories::AggregatingVulnerabilityRepository,
+    repository_source::{GitHubRepositoryClient, RepositorySourceClient},
     },
     init_tracing,
     presentation::{AppState, create_router},
@@ -65,11 +66,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     let analysis_service = Arc::new(AnalysisServiceImpl::new(
-        parser_factory,
+        parser_factory.clone(),
         vulnerability_repository.clone(),
         cache_service.clone(),
     ));
     let report_service = Arc::new(ReportServiceImpl::new());
+    // GitHub repository analysis components (stub wiring)
+    let github_client = Arc::new(
+        GitHubRepositoryClient::from_token(
+            config.apis.github.token.clone(),
+            Some(config.apis.github.base_url.clone()),
+            config.apis.github.timeout_seconds,
+            config.apis.github.reuse_ghsa_token,
+        ).unwrap_or_else(|e| {
+            tracing::warn!(error=?e, "Failed to init GitHubRepositoryClient, repository analysis disabled");
+            GitHubRepositoryClient::new(
+                octocrab::Octocrab::builder().build().expect("octocrab build"),
+                "https://api.github.com".into(),
+                false,
+                10,
+            )
+        })
+    );
+    let repository_analysis_service: Option<Arc<dyn vulnera_rust::application::RepositoryAnalysisService>> = Some(Arc::new(
+        vulnera_rust::application::RepositoryAnalysisServiceImpl::new(
+            github_client.clone(),
+            vulnerability_repository.clone(),
+            parser_factory.clone(),
+        )
+    ));
 
     // Create popular package service with config
     let config_arc = Arc::new(config.clone());
@@ -86,6 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         report_service,
         vulnerability_repository,
         popular_package_service,
+    repository_analysis_service,
     };
 
     // Create router

@@ -56,12 +56,14 @@ toml = "0.9.5"
 serde_yaml = "0.9.34-deprecated"
 regex = "1.11.1"
 semver = { version = "1.0", features = ["serde"] }
+octocrab = { version = "0.32", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
-tokio-test = "0.4.4"
+tempfile = "3.21.0"
+axum-test = "18.0"
 mockito = "1.7.0"
-tempfile = "3.21"
-axum-test = "17.3.0"
 
 [build-dependencies]
 vergen = { version = "8.0", features = ["build", "git", "gitcl"] }
+tokio-test = "0.4.4"
+mockito = "1.7.0"

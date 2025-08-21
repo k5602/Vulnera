@@ -77,6 +77,7 @@ mod tests {
             report_service,
             vulnerability_repository: vuln_repo,
             popular_package_service,
+            repository_analysis_service: None,
         }
     }
 

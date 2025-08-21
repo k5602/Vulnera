@@ -117,6 +117,7 @@ pub struct AppState {
     pub report_service: Arc<crate::application::ReportServiceImpl>,
     pub vulnerability_repository: Arc<dyn crate::infrastructure::VulnerabilityRepository>,
     pub popular_package_service: Arc<dyn crate::application::PopularPackageService>,
+    pub repository_analysis_service: Option<Arc<dyn crate::application::RepositoryAnalysisService>>, // optional until fully wired
 }
 
 /// Analyze dependencies endpoint
