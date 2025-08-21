@@ -191,12 +191,26 @@ impl AggregatingVulnerabilityRepository {
     /// Parse severity string to Severity enum with fallback
     fn parse_severity(&self, severity_str: &Option<String>) -> Severity {
         if let Some(severity) = severity_str {
+            // First, try to parse as a float for CVSS scores
+            if let Ok(score) = severity.parse::<f64>() {
+                if score >= 9.0 {
+                    return Severity::Critical;
+                } else if score >= 7.0 {
+                    return Severity::High;
+                } else if score >= 4.0 {
+                    return Severity::Medium;
+                } else if score > 0.0 {
+                    return Severity::Low;
+                }
+            }
+
+            // If parsing as float fails, try string matching
             let severity_lower = severity.to_lowercase();
             match severity_lower.as_str() {
-                "critical" | "9.0" | "10.0" => Severity::Critical,
-                "high" | "7.0" | "8.0" | "8.9" => Severity::High,
-                "medium" | "4.0" | "5.0" | "6.0" | "6.9" => Severity::Medium,
-                "low" | "0.1" | "1.0" | "2.0" | "3.9" => Severity::Low,
+                "critical" => Severity::Critical,
+                "high" => Severity::High,
+                "medium" => Severity::Medium,
+                "low" => Severity::Low,
                 _ => {
                     debug!("Unknown severity '{}', defaulting to Medium", severity);
                     Severity::Medium
