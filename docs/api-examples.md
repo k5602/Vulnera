@@ -6,7 +6,7 @@ The Vulnera API provides comprehensive vulnerability analysis for dependency fil
 
 ## Authentication
 
-Currently, the API does not require authentication. All endpoints are publicly accessible.
+Currently, the API does not require authentication for core endpoints. For repository analysis against GitHub, providing a GitHub token via server configuration is recommended for higher rate limits.
 
 ## Base URL
 
@@ -50,6 +50,28 @@ curl -X POST "http://localhost:3000/api/v1/analyze" \
     "filename": "Cargo.toml"
   }'
 ```
+
+### 4. Analyze a public GitHub repository
+
+Scan supported dependency manifests across a repository:
+
+```bash
+curl -X POST "http://localhost:3000/api/v1/analyze/repository" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repository_url": "https://github.com/rust-lang/cargo",
+    "ref": "main",
+    "include_paths": ["crates/", "src/"],
+    "exclude_paths": ["tests/"],
+    "return_packages": false
+  }'
+```
+
+Notes:
+
+- Server clamps file count and total bytes per scan based on `apis.github` caps in config.
+- Configure a token for better GitHub rate limits.
+
 
 ## Supported Ecosystems
 
@@ -370,6 +392,7 @@ The API uses standard HTTP status codes:
 - **500**: Internal Server Error
 
 All error responses include a structured error object with:
+
 - `code`: Machine-readable error code
 - `message`: Human-readable description
 - `details`: Additional context (optional)
@@ -393,6 +416,15 @@ All error responses include a structured error object with:
 ## Support
 
 For API support and questions:
+
 - **Documentation**: Available at `/docs` endpoint
-- **Email**: degea5601@gmail.com
+- **Email**: <mailto:degea5601@gmail.com>
 - **Issues**: Report bugs and feature requests on GitHub
+
+## Team
+
+- Khaled Mahmoud — Project Manager, Main Developer, Rust Backend Developer
+- Amr Medhat — Cloud Engineer
+- Youssef Mohammed — Database Engineer
+- Gasser Mohammed — Frontend Developer
+- Abd El-Rahman Mossad — Frontend Developer

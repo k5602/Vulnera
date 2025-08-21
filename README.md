@@ -1,11 +1,11 @@
-# Vulnera Rust - Vulnerability Analysis API
+# Vulnera Rust – Vulnerability Analysis API
 
-A comprehensive, high-performance vulnerability analysis API built with Rust, designed to analyze software dependencies across multiple programming language ecosystems. This is the next-generation Rust backend that replaces the original Python implementation with enhanced performance, scalability, and multi-ecosystem support.
+A high-performance vulnerability analysis API built with Rust. Vulnera analyzes dependency manifests across multiple ecosystems, aggregates results from OSV/NVD/GHSA, and exposes a clean HTTP API with OpenAPI docs. This Rust backend replaces the original Python implementation with better performance, scalability, and ecosystem coverage.
 
 ## Features
 
 - **🚀 High Performance**: Built with Rust and Tokio for maximum concurrency and speed
-- **🌐 Multi-Ecosystem Support**: Analyze dependencies from npm, PyPI, Maven, Cargo, Go, Packagist, RubyGems, and NuGet
+- **🌐 Multi-Ecosystem Support**: Analyze dependencies from npm, PyPI, Maven/Gradle, Cargo, Go, and Packagist
 - **🏗️ Domain-Driven Design**: Clean architecture with separation of concerns for maintainability
 - **📊 Multiple Data Sources**: Integrates with OSV, NVD, and GitHub Security Advisories
 - **⚡ Async Architecture**: Full async/await implementation for optimal performance
@@ -229,13 +229,14 @@ docker run -p 3000:3000 -e VULNERA__SERVER__PORT=3000 vulnera-rust
 
 Once the server is running, you can access:
 
-- **API Documentation**: http://localhost:3000/docs
-- **Health Check**: http://localhost:3000/health
-- **Detailed Health**: http://localhost:3000/health/detailed
+- **API Documentation**: <http://localhost:3000/docs>
+- **Health Check**: <http://localhost:3000/health>
+- **Detailed Health**: <http://localhost:3000/health/detailed>
+- **Prometheus Metrics**: <http://localhost:3000/metrics>
 
-### Analyzing Dependencies
+### Analyzing Dependencies (single file)
 
-**POST /api/v1/analyze**
+#### POST /api/v1/analyze
 
 ```bash
 # Analyze a Python requirements.txt file
@@ -266,9 +267,30 @@ curl -X POST http://localhost:3000/api/v1/analyze \
   }'
 ```
 
+### Analyze an entire GitHub repository
+
+POST /api/v1/analyze/repository scans supported manifests in a public GitHub repo (optionally filtered by paths):
+
+```bash
+curl -X POST http://localhost:3000/api/v1/analyze/repository \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repository_url": "https://github.com/rust-lang/cargo",
+    "ref": "main",
+    "include_paths": ["src/", "crates/"],
+    "exclude_paths": ["tests/"],
+    "return_packages": false
+  }'
+```
+
+Notes:
+
+- Server-side limits clamp file count and total bytes per repo scan (see config.github caps).
+- Configure a GitHub token for higher rate limits (see Configuration).
+
 ### Getting Vulnerability Details
 
-**GET /api/v1/vulnerabilities/{id}**
+#### GET /api/v1/vulnerabilities/{id}
 
 ```bash
 curl http://localhost:3000/api/v1/vulnerabilities/GHSA-xxxx-xxxx-xxxx
@@ -276,7 +298,7 @@ curl http://localhost:3000/api/v1/vulnerabilities/GHSA-xxxx-xxxx-xxxx
 
 ### Retrieving Analysis Reports
 
-**GET /api/v1/reports/{id}**
+#### GET /api/v1/reports/{id}
 
 ```bash
 curl http://localhost:3000/api/v1/reports/550e8400-e29b-41d4-a716-446655440000
@@ -284,52 +306,74 @@ curl http://localhost:3000/api/v1/reports/550e8400-e29b-41d4-a716-446655440000
 
 ### Environment Variables
 
-The script can use an API key from the environment variable:
+Server configuration is file- and env-driven. Key overrides (prefix VULNERA__, double underscores between sections):
 
 ```bash
-export VULNERABILITY_API_KEY=your_api_key_here
-python vulnerability_analyzer.py requirements.txt
-```
+# Server
+VULNERA__SERVER__HOST=0.0.0.0
+VULNERA__SERVER__PORT=3000
+VULNERA__SERVER__ENABLE_DOCS=true
+VULNERA__SERVER__REQUEST_TIMEOUT_SECONDS=45
 
-**Note**: Currently, the OSV API doesn't require an API key, but the script is designed to support it for future use or other vulnerability databases.
+# Cache
+VULNERA__CACHE__DIRECTORY=.vulnera_cache
+VULNERA__CACHE__TTL_HOURS=24
+
+# External APIs (tokens optional but recommended)
+VULNERA__APIS__NVD__API_KEY=your_nvd_api_key_here
+VULNERA__APIS__GHSA__TOKEN=ghp_xxx
+VULNERA__APIS__GITHUB__TOKEN=ghp_xxx  # used for repository analysis; if omitted and reuse_ghsa_token=true, GHSA token is reused
+
+# Logging
+VULNERA__LOGGING__LEVEL=info
+VULNERA__LOGGING__FORMAT=json
+
+# Select profile
+ENV=development|staging|production
+```
 
 ## Supported Ecosystems & File Formats
 
+ 
 ### Python (PyPI)
+
 - `requirements.txt`
 - `Pipfile`
 - `pyproject.toml`
 
+ 
 ### Node.js (npm)
+
 - `package.json`
 - `package-lock.json`
 - `yarn.lock`
 
-### Java (Maven)
+ 
+### Java (Maven/Gradle)
+
 - `pom.xml`
 - `build.gradle`
 - `build.gradle.kts`
 
+ 
 ### Rust (Cargo)
+
 - `Cargo.toml`
 - `Cargo.lock`
 
+ 
 ### Go
+
 - `go.mod`
 - `go.sum`
 
+ 
 ### PHP (Packagist)
+
 - `composer.json`
 - `composer.lock`
 
-### Ruby (RubyGems)
-- `Gemfile`
-- `Gemfile.lock`
-
-### .NET (NuGet)
-- `packages.config`
-- `*.csproj`
-- `Directory.Packages.props`
+<!-- Ruby and .NET are not currently supported by built-in parsers. Add new parsers under src/infrastructure/parsers to enable. -->
 
 ## API Response Examples
 
@@ -401,6 +445,32 @@ python vulnerability_analyzer.py requirements.txt
 }
 ```
 
+### Repository Analysis Response (excerpt)
+
+The repository scan responds with repository descriptor, per-file results, and aggregated vulnerabilities. Example excerpt:
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "repository": {
+    "owner": "rust-lang",
+    "repo": "cargo",
+    "requested_ref": "main",
+    "commit_sha": "a1b2c3d4...",
+    "source_url": "https://github.com/rust-lang/cargo"
+  },
+  "metadata": {
+    "total_files_scanned": 120,
+    "analyzed_files": 35,
+    "skipped_files": 85,
+    "unique_packages": 98,
+    "total_vulnerabilities": 12,
+    "duration_ms": 2500,
+    "truncated": false
+  }
+}
+```
+
 ## Configuration
 
 ### Environment Profiles & Variables
@@ -414,15 +484,22 @@ Profile goals:
 - Production: hardened; Swagger UI disabled (unless explicitly enabled), strict CORS, lean logging.
 
 Configuration files loaded in order (later overrides earlier):
+
 1. `config/default.toml`
 2. `config/local.toml` (optional, git-ignored)
 3. `config/{ENV}.toml` if `ENV` is set
 4. Environment variables with prefix `VULNERA__` (highest precedence)
 
-Key new server fields:
+Key server and GitHub repository analysis fields:
+
 - `enable_docs` (bool): Expose Swagger UI at `/docs` when true.
 - `request_timeout_seconds` (u64): Global per-request timeout.
 - `allowed_origins` (array): CORS origins (use `[*]` only in development).
+- `apis.github`:
+  - `token` (string, optional): Personal access token for repository scans.
+  - `reuse_ghsa_token` (bool): If true, reuse GHSA token for GitHub REST.
+  - `max_concurrent_file_fetches`, `max_files_scanned`, `max_total_bytes`, `max_single_file_bytes` caps.
+  - `backoff_*` knobs for rate-limit retries.
 
 ```bash
 # Server Configuration
@@ -558,22 +635,25 @@ The application follows DDD principles with clear separation of concerns:
 ## Vulnerability Data Sources
 
 ### OSV (Open Source Vulnerability) Database
-- **Base URL**: https://api.osv.dev/v1
+
+- **Base URL**: <https://api.osv.dev/v1>
 - **Coverage**: Multi-ecosystem vulnerability database
 - **Rate Limiting**: Built-in rate limiting with exponential backoff
-- **Documentation**: https://osv.dev/
+- **Documentation**: <https://osv.dev/>
 
 ### National Vulnerability Database (NVD)
-- **Base URL**: https://services.nvd.nist.gov/rest/json
+
+- **Base URL**: <https://services.nvd.nist.gov/rest/json>
 - **Coverage**: Comprehensive CVE database
 - **API Key**: Optional but recommended for higher rate limits
-- **Documentation**: https://nvd.nist.gov/developers
+- **Documentation**: <https://nvd.nist.gov/developers>
 
 ### GitHub Security Advisories (GHSA)
-- **Base URL**: https://api.github.com/graphql
+
+- **Base URL**: <https://api.github.com/graphql>
 - **Coverage**: GitHub-specific security advisories
 - **Authentication**: GitHub token required
-- **Documentation**: https://docs.github.com/en/graphql
+- **Documentation**: <https://docs.github.com/en/graphql>
 
 ## Vulnerability Severity Levels
 
@@ -708,6 +788,7 @@ docker logs vulnera-rust
 - **Discussions**: Join GitHub Discussions for questions
 - **Documentation**: Check the `/docs` endpoint when running
 - **API Reference**: Available at `/docs` when server is running
+
 ## Changelog
 
 ### v3.0.0 (Current - Rust Rewrite)
@@ -766,3 +847,11 @@ MIT License - See LICENSE file for details
 - [ ] **Custom Rules**: User-defined vulnerability filtering and scoring
 - [ ] **Reporting Engine**: Advanced report templates and formats
 - [ ] **Plugin System**: Extensible architecture for custom integrations
+
+## Team
+
+- Khaled Mahmoud — Project Manager, Main Developer, Rust Backend Developer
+- Amr Medhat — Cloud Engineer
+- Youssef Mohammed — Database Engineer
+- Gasser Mohammed — Frontend Developer
+- Abd El-Rahman Mossad — Frontend Developer
