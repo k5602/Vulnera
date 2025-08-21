@@ -6,7 +6,7 @@ port = 3000
 workers = 4
 enable_docs = true
 request_timeout_seconds = 30
-allowed_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+allowed_origins = []
 
 [server.security]
 enforce_https = false

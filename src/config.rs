@@ -161,15 +161,18 @@ impl Config {
     /// Load configuration from files and environment variables
     pub fn load() -> Result<Self, config::ConfigError> {
         let mut builder = config::Config::builder()
-            .add_source(config::File::with_name("config/default").required(false))
-            .add_source(config::File::with_name("config/local").required(false))
-            .add_source(config::Environment::with_prefix("VULNERA").separator("__"));
+            .add_source(config::File::with_name("config/default").required(false));
 
-        // Override with environment-specific config if ENV is set
+        // Add environment-specific config if ENV is set
         if let Ok(env) = std::env::var("ENV") {
             builder = builder
                 .add_source(config::File::with_name(&format!("config/{}", env)).required(false));
         }
+
+        // Add local config and environment variables last (highest priority)
+        builder = builder
+            .add_source(config::File::with_name("config/local").required(false))
+            .add_source(config::Environment::with_prefix("VULNERA").separator("__"));
 
         builder.build()?.try_deserialize()
     }
