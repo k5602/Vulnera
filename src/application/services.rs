@@ -287,7 +287,7 @@ where
             owner: input.owner.clone(),
             repo: input.repo.clone(),
             requested_ref: input.requested_ref.clone(),
-            commit_sha: "".into(),
+            commit_sha: input.commit_sha.clone(),
             files: parsed_files,
             vulnerabilities: all_vulns.clone(),
             severity_breakdown,
