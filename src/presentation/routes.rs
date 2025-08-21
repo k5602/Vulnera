@@ -36,6 +36,7 @@ use axum::{
 #[openapi(
     paths(
         crate::presentation::controllers::analysis::analyze_dependencies,
+    crate::presentation::controllers::analysis::analyze_repository,
         crate::presentation::controllers::analysis::get_vulnerability,
         crate::presentation::controllers::analysis::list_vulnerabilities,
         crate::presentation::controllers::analysis::refresh_vulnerability_cache,
@@ -61,7 +62,7 @@ use axum::{
         )
     ),
     tags(
-        (name = "analysis", description = "Vulnerability analysis endpoints for dependency files"),
+    (name = "analysis", description = "Vulnerability analysis endpoints for dependency files and repositories"),
         (name = "vulnerabilities", description = "Vulnerability information and lookup endpoints"),
         (name = "health", description = "System health monitoring and metrics endpoints")
     ),
@@ -96,6 +97,7 @@ pub struct ApiDoc;
 pub fn create_router(app_state: AppState, config: &Config) -> Router {
     let api_routes = Router::new()
         .route("/analyze", post(analyze_dependencies))
+    .route("/analyze/repository", post(crate::presentation::controllers::analysis::analyze_repository))
         .route("/vulnerabilities", get(list_vulnerabilities))
         .route(
             "/vulnerabilities/refresh-cache",

@@ -141,8 +141,7 @@ where
         input: RepositoryAnalysisInput,
     ) -> Result<RepositoryAnalysisInternalResult, ApplicationError> {
         let start = std::time::Instant::now();
-        // Outline only (detailed implementation later)
-        let files = match self
+        let files = self
             .source_client
             .list_repository_files(
                 &input.owner,
@@ -152,14 +151,22 @@ where
                 5_000_000,
             )
             .await
-        {
-            Ok(f) => f,
-            Err(e) => {
-                return Err(ApplicationError::Configuration {
-                    message: format!("repository source error: {e}"),
-                });
-            }
-        };
+            .map_err(|e| ApplicationError::Configuration {
+                message: format!("repository source error: {e}"),
+            })?;
+
+        // Placeholder: pretend we fetched + parsed none
+        let parsed_files: Vec<RepositoryFileResultInternal> = files
+            .iter()
+            .map(|f| RepositoryFileResultInternal {
+                path: f.path.clone(),
+                ecosystem: self.parser_factory.detect_ecosystem(&f.path),
+                packages: vec![],
+                error: None,
+            })
+            .collect();
+
+        let vulnerabilities: Vec<Vulnerability> = Vec::new();
 
         let internal = RepositoryAnalysisInternalResult {
             id: uuid::Uuid::new_v4(),
@@ -167,13 +174,15 @@ where
             repo: input.repo.clone(),
             requested_ref: input.requested_ref.clone(),
             commit_sha: "".into(),
-            files: vec![],
-            vulnerabilities: vec![],
-            severity_breakdown: crate::domain::SeverityBreakdown::from_vulnerabilities(&[]),
+            files: parsed_files,
+            vulnerabilities: vulnerabilities.clone(),
+            severity_breakdown: crate::domain::SeverityBreakdown::from_vulnerabilities(
+                &vulnerabilities,
+            ),
             total_files_scanned: files.len() as u32,
-            analyzed_files: 0,
+            analyzed_files: files.len() as u32,
             skipped_files: 0,
-            unique_packages: 0,
+            unique_packages: 0, // will compute when packages populated
             duration: start.elapsed(),
             file_errors: 0,
             rate_limit_remaining: None,

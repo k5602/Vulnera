@@ -12,7 +12,10 @@ use crate::application::{CacheService, errors::ApplicationError};
 use crate::domain::{Ecosystem, VulnerabilityId};
 use crate::presentation::models::{
     AffectedPackageDto, AnalysisMetadataDto, AnalysisRequest, AnalysisResponse, ErrorResponse,
-    PaginationDto, SeverityBreakdownDto, VulnerabilityDto, VulnerabilityListResponse,
+    PaginationDto, RepositoryAnalysisMetadataDto, RepositoryAnalysisRequest,
+    RepositoryAnalysisResponse, RepositoryConfigCapsDto, RepositoryDescriptorDto,
+    RepositoryFileResultDto, RepositoryPackageDto, SeverityBreakdownDto, VulnerabilityDto,
+    VulnerabilityListResponse,
 };
 
 /// Query parameters for pagination
@@ -118,6 +121,166 @@ pub struct AppState {
     pub vulnerability_repository: Arc<dyn crate::infrastructure::VulnerabilityRepository>,
     pub popular_package_service: Arc<dyn crate::application::PopularPackageService>,
     pub repository_analysis_service: Option<Arc<dyn crate::application::RepositoryAnalysisService>>, // optional until fully wired
+}
+
+/// Analyze an entire repository (stub implementation)
+#[utoipa::path(
+    post,
+    path = "/api/v1/analyze/repository",
+    tag = "repository",
+    request_body = RepositoryAnalysisRequest,
+    responses(
+        (status = 200, description = "Repository analysis completed", body = RepositoryAnalysisResponse),
+        (status = 400, description = "Invalid request", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
+pub async fn analyze_repository(
+    State(app_state): State<AppState>,
+    Json(request): Json<RepositoryAnalysisRequest>,
+) -> Result<Json<RepositoryAnalysisResponse>, ApplicationError> {
+    let service = match &app_state.repository_analysis_service {
+        Some(s) => s.clone(),
+        None => {
+            return Err(ApplicationError::Configuration {
+                message: "Repository analysis not enabled".into(),
+            });
+        }
+    };
+    // Derive owner/repo
+    let (owner, repo, derived_ref) = if let Some(url) = &request.repository_url {
+        if let Some(parsed) = crate::infrastructure::repository_source::parse_github_repo_url(url) {
+            (parsed.owner, parsed.repo, parsed.r#ref)
+        } else {
+            return Err(ApplicationError::Configuration {
+                message: "Invalid repository_url".into(),
+            });
+        }
+    } else {
+        let owner = request
+            .owner
+            .clone()
+            .ok_or_else(|| ApplicationError::Configuration {
+                message: "owner required".into(),
+            })?;
+        let repo = request
+            .repo
+            .clone()
+            .ok_or_else(|| ApplicationError::Configuration {
+                message: "repo required".into(),
+            })?;
+        (owner, repo, None)
+    };
+
+    let effective_ref = request.r#ref.clone().or(derived_ref);
+
+    let input = crate::application::RepositoryAnalysisInput {
+        owner: owner.clone(),
+        repo: repo.clone(),
+        requested_ref: effective_ref.clone(),
+        include_paths: request.include_paths.clone(),
+        exclude_paths: request.exclude_paths.clone(),
+        max_files: request.max_files.unwrap_or(100),
+        include_lockfiles: request.include_lockfiles.unwrap_or(true),
+        return_packages: request.return_packages.unwrap_or(false),
+    };
+
+    let result = service.analyze_repository(input).await?;
+
+    let files: Vec<RepositoryFileResultDto> = result
+        .files
+        .iter()
+        .map(|f| RepositoryFileResultDto {
+            path: f.path.clone(),
+            ecosystem: f
+                .ecosystem
+                .as_ref()
+                .map(|e| format!("{:?}", e).to_lowercase()),
+            packages_count: f.packages.len() as u32,
+            packages: if request.return_packages.unwrap_or(false) {
+                Some(
+                    f.packages
+                        .iter()
+                        .map(|p| RepositoryPackageDto {
+                            name: p.name.clone(),
+                            version: p.version.to_string(),
+                            ecosystem: format!("{:?}", p.ecosystem).to_lowercase(),
+                        })
+                        .collect(),
+                )
+            } else {
+                None
+            },
+            error: f.error.clone(),
+        })
+        .collect();
+
+    let vulnerabilities: Vec<VulnerabilityDto> = result
+        .vulnerabilities
+        .iter()
+        .map(|v| VulnerabilityDto {
+            id: v.id.as_str().to_string(),
+            summary: v.summary.clone(),
+            description: v.description.clone(),
+            severity: format!("{:?}", v.severity),
+            affected_packages: v
+                .affected_packages
+                .iter()
+                .map(|ap| AffectedPackageDto {
+                    name: ap.package.name.clone(),
+                    version: ap.package.version.to_string(),
+                    ecosystem: format!("{:?}", ap.package.ecosystem).to_lowercase(),
+                    vulnerable_ranges: ap
+                        .vulnerable_ranges
+                        .iter()
+                        .map(|r| format!("{:?}", r))
+                        .collect(),
+                    fixed_versions: ap.fixed_versions.iter().map(|fx| fx.to_string()).collect(),
+                })
+                .collect(),
+            references: v.references.clone(),
+            published_at: v.published_at,
+            sources: v.sources.iter().map(|s| format!("{:?}", s)).collect(),
+        })
+        .collect();
+
+    let metadata = RepositoryAnalysisMetadataDto {
+        total_files_scanned: result.total_files_scanned,
+        analyzed_files: result.analyzed_files,
+        skipped_files: result.skipped_files,
+        unique_packages: result.unique_packages,
+        total_vulnerabilities: result.vulnerabilities.len() as u32,
+        severity_breakdown: SeverityBreakdownDto {
+            critical: result.severity_breakdown.critical,
+            high: result.severity_breakdown.high,
+            medium: result.severity_breakdown.medium,
+            low: result.severity_breakdown.low,
+        },
+        duration_ms: result.duration.as_millis() as u64,
+        file_errors: result.file_errors,
+        rate_limit_remaining: result.rate_limit_remaining,
+        truncated: result.truncated,
+        config_caps: RepositoryConfigCapsDto {
+            max_files_scanned: result.total_files_scanned.max(result.analyzed_files),
+            max_total_bytes: 2_000_000,
+        },
+    };
+
+    let response = RepositoryAnalysisResponse {
+        id: result.id,
+        repository: RepositoryDescriptorDto {
+            owner,
+            repo,
+            requested_ref: effective_ref,
+            commit_sha: result.commit_sha,
+            source_url: request.repository_url.clone(),
+        },
+        files,
+        vulnerabilities,
+        metadata,
+    };
+
+    Ok(Json(response))
 }
 
 /// Analyze dependencies endpoint
