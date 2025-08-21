@@ -1,5 +1,11 @@
-//! Comprehensive unit tests for application services
-
+// Repository analysis service tests
+use super::{RepositoryAnalysisInput, RepositoryAnalysisService, RepositoryAnalysisServiceImpl};
+use crate::infrastructure::VulnerabilityRepository;
+use crate::infrastructure::parsers::ParserFactory;
+use crate::infrastructure::repository_source::{
+    FetchedFileContent, RepositoryFile, RepositorySourceClient, RepositorySourceError,
+};
+use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,11 +17,93 @@ use crate::domain::{
     AffectedPackage, AnalysisReport, Ecosystem, Package, Severity, Version, VersionRange,
     Vulnerability, VulnerabilityId, VulnerabilitySource,
 };
-use crate::infrastructure::{
-    VulnerabilityRepository, cache::file_cache::FileCacheRepository, parsers::ParserFactory,
-};
+use crate::infrastructure::cache::file_cache::FileCacheRepository;
 use chrono::Utc;
 use tempfile::TempDir;
+
+struct MockRepoSource {
+    files: Vec<RepositoryFile>,
+    contents: Vec<FetchedFileContent>,
+}
+
+#[async_trait]
+impl RepositorySourceClient for MockRepoSource {
+    async fn list_repository_files(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _ref: Option<&str>,
+        _max_files: u32,
+        _max_bytes: u64,
+    ) -> Result<Vec<RepositoryFile>, RepositorySourceError> {
+        Ok(self.files.clone())
+    }
+    async fn fetch_file_contents(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _files: &[RepositoryFile],
+        _ref: Option<&str>,
+        _single_file_max_bytes: u64,
+        _concurrent_limit: usize,
+    ) -> Result<Vec<FetchedFileContent>, RepositorySourceError> {
+        Ok(self.contents.clone())
+    }
+}
+
+struct MockVulnRepo;
+#[async_trait]
+impl VulnerabilityRepository for MockVulnRepo {
+    async fn find_vulnerabilities(
+        &self,
+        _package: &crate::domain::Package,
+    ) -> Result<Vec<crate::domain::Vulnerability>, crate::application::errors::VulnerabilityError>
+    {
+        Ok(vec![])
+    }
+    async fn get_vulnerability_by_id(
+        &self,
+        _id: &crate::domain::VulnerabilityId,
+    ) -> Result<Option<crate::domain::Vulnerability>, crate::application::errors::VulnerabilityError>
+    {
+        Ok(None)
+    }
+}
+
+#[tokio::test]
+async fn repository_analysis_parses_supported_files() {
+    let parser_factory = Arc::new(ParserFactory::new());
+    // Provide a simple package.json content
+    let files = vec![RepositoryFile {
+        path: "package.json".into(),
+        size: 40,
+        is_text: true,
+    }];
+    let contents = vec![FetchedFileContent { path: "package.json".into(), content: "{\n  \"name\": \"demo\",\n  \"version\": \"1.0.0\",\n  \"dependencies\": { \"left-pad\": \"1.0.0\" }\n}".into() }];
+    let source = Arc::new(MockRepoSource { files, contents });
+    let vuln_repo = Arc::new(MockVulnRepo);
+    let cfg = Arc::new(crate::config::Config::default());
+    let service = RepositoryAnalysisServiceImpl::new(source, vuln_repo, parser_factory, cfg);
+    let input = RepositoryAnalysisInput {
+        owner: "o".into(),
+        repo: "r".into(),
+        requested_ref: None,
+        include_paths: None,
+        exclude_paths: None,
+        max_files: 50,
+        include_lockfiles: true,
+        return_packages: true,
+    };
+    let result = service
+        .analyze_repository(input)
+        .await
+        .expect("analysis ok");
+    assert_eq!(result.files.len(), 1);
+    assert_eq!(
+        result.unique_packages, 1,
+        "should parse one package dependency (left-pad)"
+    );
+}
 
 // Mock implementations for testing
 

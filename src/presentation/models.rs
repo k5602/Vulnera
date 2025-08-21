@@ -233,3 +233,129 @@ pub struct VulnerabilityListResponse {
     /// Pagination metadata for navigating through results
     pub pagination: PaginationDto,
 }
+
+/// Request for analyzing an entire GitHub repository's dependency manifests
+#[derive(Deserialize, ToSchema)]
+pub struct RepositoryAnalysisRequest {
+    /// Full repository URL (preferred). Examples:
+    /// https://github.com/owner/repo, git@github.com:owner/repo.git, https://github.com/owner/repo/tree/main
+    #[schema(example = "https://github.com/rust-lang/cargo")]
+    pub repository_url: Option<String>,
+
+    /// Optional explicit owner (used if repository_url not provided)
+    #[schema(example = "rust-lang")]
+    pub owner: Option<String>,
+
+    /// Optional explicit repo name (used if repository_url not provided)
+    #[schema(example = "cargo")]
+    pub repo: Option<String>,
+
+    /// Optional ref (branch, tag, or commit SHA). Overrides any ref derivable from the URL.
+    #[schema(example = "main")]
+    pub r#ref: Option<String>,
+
+    /// Limit analysis to these path prefixes (case-sensitive)
+    #[schema(example = "[\"crates/\", \"src/\"]")]
+    pub include_paths: Option<Vec<String>>,
+
+    /// Exclude these path prefixes
+    #[schema(example = "[\"tests/\"]")]
+    pub exclude_paths: Option<Vec<String>>,
+
+    /// Client-requested max files (clamped by server config)
+    #[schema(example = 100)]
+    pub max_files: Option<u32>,
+
+    /// Whether to include lockfiles (package-lock.json, yarn.lock, Cargo.lock, etc.)
+    #[schema(example = true, default = true)]
+    pub include_lockfiles: Option<bool>,
+
+    /// Include per-file package listings in response (may increase payload size)
+    #[schema(example = false, default = false)]
+    pub return_packages: Option<bool>,
+}
+
+/// Per-file result in repository analysis
+#[derive(Serialize, ToSchema)]
+pub struct RepositoryFileResultDto {
+    #[schema(example = "package.json")]
+    pub path: String,
+    #[schema(example = "npm")]
+    pub ecosystem: Option<String>,
+    #[schema(example = 12)]
+    pub packages_count: u32,
+    pub packages: Option<Vec<RepositoryPackageDto>>,
+    #[schema(example = "ParseError: invalid syntax")]
+    pub error: Option<String>,
+}
+
+/// Package reference within a repository analysis
+#[derive(Serialize, ToSchema)]
+pub struct RepositoryPackageDto {
+    #[schema(example = "lodash")]
+    pub name: String,
+    #[schema(example = "4.17.21")]
+    pub version: String,
+    #[schema(example = "npm")]
+    pub ecosystem: String,
+}
+
+/// Metadata describing repository analysis execution
+#[derive(Serialize, ToSchema)]
+pub struct RepositoryAnalysisMetadataDto {
+    #[schema(example = 42)]
+    pub total_files_scanned: u32,
+    #[schema(example = 35)]
+    pub analyzed_files: u32,
+    #[schema(example = 7)]
+    pub skipped_files: u32,
+    #[schema(example = 120)]
+    pub unique_packages: u32,
+    #[schema(example = 18)]
+    pub total_vulnerabilities: u32,
+    pub severity_breakdown: SeverityBreakdownDto,
+    #[schema(example = 2500)]
+    pub duration_ms: u64,
+    #[schema(example = 3)]
+    pub file_errors: u32,
+    #[schema(example = 4999)]
+    pub rate_limit_remaining: Option<u32>,
+    #[schema(example = false)]
+    pub truncated: bool,
+    pub config_caps: RepositoryConfigCapsDto,
+}
+
+/// Server enforced caps included for transparency
+#[derive(Serialize, ToSchema)]
+pub struct RepositoryConfigCapsDto {
+    #[schema(example = 200)]
+    pub max_files_scanned: u32,
+    #[schema(example = 2000000)]
+    pub max_total_bytes: u64,
+}
+
+/// Main response for repository analysis
+#[derive(Serialize, ToSchema)]
+pub struct RepositoryAnalysisResponse {
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub id: Uuid,
+    pub repository: RepositoryDescriptorDto,
+    pub files: Vec<RepositoryFileResultDto>,
+    pub vulnerabilities: Vec<VulnerabilityDto>,
+    pub metadata: RepositoryAnalysisMetadataDto,
+}
+
+/// Repository identification descriptor
+#[derive(Serialize, ToSchema)]
+pub struct RepositoryDescriptorDto {
+    #[schema(example = "rust-lang")]
+    pub owner: String,
+    #[schema(example = "cargo")]
+    pub repo: String,
+    #[schema(example = "main")]
+    pub requested_ref: Option<String>,
+    #[schema(example = "a1b2c3d4e5f6g7h8i9j0")]
+    pub commit_sha: String,
+    #[schema(example = "https://github.com/rust-lang/cargo")]
+    pub source_url: Option<String>,
+}

@@ -76,6 +76,7 @@ pub struct ApiConfig {
     pub osv: OsvConfig,
     pub nvd: NvdConfig,
     pub ghsa: GhsaConfig,
+    pub github: GitHubConfig,
 }
 
 /// OSV API configuration
@@ -100,6 +101,22 @@ pub struct GhsaConfig {
     pub graphql_url: String,
     pub token: Option<String>,
     pub timeout_seconds: u64,
+}
+
+/// GitHub repository analysis configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitHubConfig {
+    pub base_url: String,
+    pub token: Option<String>,
+    pub reuse_ghsa_token: bool,
+    pub timeout_seconds: u64,
+    pub max_concurrent_file_fetches: usize,
+    pub max_files_scanned: usize,
+    pub max_total_bytes: u64,
+    pub max_single_file_bytes: u64,
+    pub backoff_initial_ms: u64,
+    pub backoff_max_retries: u32,
+    pub backoff_jitter: bool,
 }
 
 /// Logging configuration
@@ -146,6 +163,19 @@ impl Default for Config {
                     graphql_url: "https://api.github.com/graphql".to_string(),
                     token: None,
                     timeout_seconds: 30,
+                },
+                github: GitHubConfig {
+                    base_url: "https://api.github.com".to_string(),
+                    token: None,
+                    reuse_ghsa_token: true,
+                    timeout_seconds: 30,
+                    max_concurrent_file_fetches: 8,
+                    max_files_scanned: 200,
+                    max_total_bytes: 2_000_000,
+                    max_single_file_bytes: 1_000_000,
+                    backoff_initial_ms: 500,
+                    backoff_max_retries: 3,
+                    backoff_jitter: true,
                 },
             },
             logging: LoggingConfig {

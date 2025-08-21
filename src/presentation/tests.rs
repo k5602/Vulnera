@@ -77,6 +77,7 @@ mod tests {
             report_service,
             vulnerability_repository: vuln_repo,
             popular_package_service,
+            repository_analysis_service: None,
         }
     }
 
@@ -117,5 +118,25 @@ mod tests {
             "unexpected status: {}",
             response.status()
         );
+    }
+
+    #[tokio::test]
+    async fn repository_analysis_disabled_returns_error() {
+        let mut config = crate::Config::default();
+        config.server.enable_docs = false;
+        let app = create_router(dummy_state(), &config);
+        let body = serde_json::json!({"repository_url": "https://github.com/rust-lang/cargo"});
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/analyze/repository")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(response.status().is_server_error() || response.status().is_client_error());
     }
 }

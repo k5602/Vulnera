@@ -273,9 +273,7 @@ impl FileCacheRepository {
             serde_json::from_str(&content).map_err(ApplicationError::Json)?;
 
         if Self::is_entry_expired(&entry) {
-            fs::remove_file(path)
-                .await
-                .map_err(ApplicationError::Io)?;
+            fs::remove_file(path).await.map_err(ApplicationError::Io)?;
             debug!("Cleaned up expired cache file: {:?}", path);
             Ok(true)
         } else {
@@ -292,11 +290,7 @@ impl FileCacheRepository {
             .await
             .map_err(ApplicationError::Io)?;
 
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(ApplicationError::Io)?
-        {
+        while let Some(entry) = entries.next_entry().await.map_err(ApplicationError::Io)? {
             let path = entry.path();
 
             // Only count JSON cache files

@@ -6,6 +6,7 @@ pub mod api_clients;
 pub mod cache;
 pub mod parsers;
 pub mod repositories;
+pub mod repository_source;
 pub mod resilience;
 
 // Re-export specific items to avoid ambiguous glob conflicts
@@ -15,4 +16,5 @@ pub use cache::*;
 pub use parsers::ParserFactory;
 pub use parsers::traits::PackageFileParser;
 pub use repositories::*;
+pub use repository_source::*;
 pub use resilience::*;

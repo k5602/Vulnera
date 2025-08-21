@@ -1,7 +1,6 @@
 //! Application services for orchestrating business logic
 
 use async_trait::async_trait;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::task::JoinSet;
 use tracing::{debug, error, info, warn};
@@ -44,6 +43,266 @@ pub struct PackageSummary {
     pub vulnerability_count: usize,
     pub highest_severity: crate::domain::Severity,
     pub vulnerabilities: Vec<VulnerabilityId>,
+}
+
+// -------------------------------------------------------------------------------------------------
+// Repository Analysis (GitHub) - Service Trait & Data Structures (initial scaffold)
+// -------------------------------------------------------------------------------------------------
+
+/// Input for analyzing a repository (already validated & parsed from request/URL)
+#[derive(Debug, Clone)]
+pub struct RepositoryAnalysisInput {
+    pub owner: String,
+    pub repo: String,
+    pub requested_ref: Option<String>,
+    pub include_paths: Option<Vec<String>>,
+    pub exclude_paths: Option<Vec<String>>,
+    pub max_files: u32,
+    pub include_lockfiles: bool,
+    pub return_packages: bool,
+}
+
+/// Repository analysis file result (internal)
+#[derive(Debug, Clone)]
+pub struct RepositoryFileResultInternal {
+    pub path: String,
+    pub ecosystem: Option<Ecosystem>,
+    pub packages: Vec<Package>,
+    pub error: Option<String>,
+}
+
+/// Repository analysis aggregate result (internal) - transformed to DTO in controller
+#[derive(Debug, Clone)]
+pub struct RepositoryAnalysisInternalResult {
+    pub id: uuid::Uuid,
+    pub owner: String,
+    pub repo: String,
+    pub requested_ref: Option<String>,
+    pub commit_sha: String,
+    pub files: Vec<RepositoryFileResultInternal>,
+    pub vulnerabilities: Vec<Vulnerability>,
+    pub severity_breakdown: crate::domain::SeverityBreakdown,
+    pub total_files_scanned: u32,
+    pub analyzed_files: u32,
+    pub skipped_files: u32,
+    pub unique_packages: u32,
+    pub duration: std::time::Duration,
+    pub file_errors: u32,
+    pub rate_limit_remaining: Option<u32>,
+    pub truncated: bool,
+}
+
+/// Repository analysis service trait
+#[async_trait]
+pub trait RepositoryAnalysisService: Send + Sync {
+    async fn analyze_repository(
+        &self,
+        input: RepositoryAnalysisInput,
+    ) -> Result<RepositoryAnalysisInternalResult, ApplicationError>;
+}
+
+use crate::config::Config;
+use crate::infrastructure::ParserFactory;
+use crate::infrastructure::repository_source::RepositorySourceClient;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+/// Initial scaffold implementation (logic will be filled in subsequent commits)
+pub struct RepositoryAnalysisServiceImpl<
+    C: RepositorySourceClient,
+    R: VulnerabilityRepository + 'static,
+> {
+    source_client: Arc<C>,
+    vuln_repo: Arc<R>,
+    parser_factory: Arc<ParserFactory>,
+    config: Arc<Config>,
+}
+
+impl<C: RepositorySourceClient, R: VulnerabilityRepository> RepositoryAnalysisServiceImpl<C, R> {
+    pub fn new(
+        source_client: Arc<C>,
+        vuln_repo: Arc<R>,
+        parser_factory: Arc<ParserFactory>,
+        config: Arc<Config>,
+    ) -> Self {
+        Self {
+            source_client,
+            vuln_repo,
+            parser_factory,
+            config,
+        }
+    }
+}
+
+#[async_trait]
+impl<C, R> RepositoryAnalysisService for RepositoryAnalysisServiceImpl<C, R>
+where
+    C: RepositorySourceClient + 'static,
+    R: VulnerabilityRepository + 'static,
+{
+    #[tracing::instrument(skip(self, input))]
+    async fn analyze_repository(
+        &self,
+        input: RepositoryAnalysisInput,
+    ) -> Result<RepositoryAnalysisInternalResult, ApplicationError> {
+        let start = std::time::Instant::now();
+        let max_files = input
+            .max_files
+            .min(self.config.apis.github.max_files_scanned as u32);
+        let files = self
+            .source_client
+            .list_repository_files(
+                &input.owner,
+                &input.repo,
+                input.requested_ref.as_deref(),
+                max_files,
+                self.config.apis.github.max_total_bytes,
+            )
+            .await
+            .map_err(|e| ApplicationError::Configuration {
+                message: format!("repository source error: {e}"),
+            })?;
+        // Apply include/exclude filters
+        let filtered: Vec<_> = files
+            .into_iter()
+            .filter(|f| {
+                if let Some(ref includes) = input.include_paths {
+                    if !includes.iter().any(|p| f.path.starts_with(p)) {
+                        return false;
+                    }
+                }
+                if let Some(ref excludes) = input.exclude_paths {
+                    if excludes.iter().any(|p| f.path.starts_with(p)) {
+                        return false;
+                    }
+                }
+                true
+            })
+            .collect();
+
+        // Identify candidate dependency files (those with a parser)
+        let mut candidate_files = Vec::new();
+        let mut total_bytes: u64 = 0;
+        for f in &filtered {
+            if f.size > self.config.apis.github.max_single_file_bytes {
+                continue; // skip oversized file
+            }
+            if self.parser_factory.create_parser(&f.path).is_some() {
+                if total_bytes + f.size > self.config.apis.github.max_total_bytes {
+                    break; // enforce total bytes cap
+                }
+                total_bytes += f.size;
+                candidate_files.push(f.clone());
+            }
+        }
+
+        // Fetch contents for candidate files
+        let fetched = if candidate_files.is_empty() {
+            Vec::new()
+        } else {
+            self.source_client
+                .fetch_file_contents(
+                    &input.owner,
+                    &input.repo,
+                    &candidate_files,
+                    input.requested_ref.as_deref(),
+                    self.config.apis.github.max_single_file_bytes,
+                    self.config.apis.github.max_concurrent_file_fetches,
+                )
+                .await
+                .map_err(|e| ApplicationError::Configuration {
+                    message: format!("repository source error: {e}"),
+                })?
+        };
+
+        // Map path -> content for quick lookup
+        let mut content_map: HashMap<String, String> = HashMap::new();
+        for fc in fetched {
+            content_map.insert(fc.path, fc.content);
+        }
+
+        // Parse files
+        let mut parsed_files: Vec<RepositoryFileResultInternal> = Vec::new();
+        let mut unique_packages: HashMap<String, Package> = HashMap::new();
+        let mut file_errors = 0u32;
+
+        for file in &candidate_files {
+            let ecosystem = self.parser_factory.detect_ecosystem(&file.path);
+            if let Some(content) = content_map.get(&file.path) {
+                if let Some(parser) = self.parser_factory.create_parser(&file.path) {
+                    match parser.parse_file(content).await {
+                        Ok(pkgs) => {
+                            if input.return_packages {
+                                for p in &pkgs {
+                                    unique_packages
+                                        .entry(p.identifier())
+                                        .or_insert_with(|| p.clone());
+                                }
+                            }
+                            parsed_files.push(RepositoryFileResultInternal {
+                                path: file.path.clone(),
+                                ecosystem,
+                                packages: if input.return_packages { pkgs } else { vec![] },
+                                error: None,
+                            });
+                        }
+                        Err(e) => {
+                            file_errors += 1;
+                            parsed_files.push(RepositoryFileResultInternal {
+                                path: file.path.clone(),
+                                ecosystem,
+                                packages: vec![],
+                                error: Some(e.to_string()),
+                            });
+                        }
+                    }
+                }
+            } else {
+                // content missing (fetch failed)
+                file_errors += 1;
+                parsed_files.push(RepositoryFileResultInternal {
+                    path: file.path.clone(),
+                    ecosystem,
+                    packages: vec![],
+                    error: Some("content not fetched".into()),
+                });
+            }
+        }
+
+        // Vulnerability lookup
+        let mut all_vulns: Vec<Vulnerability> = Vec::new();
+        for pkg in unique_packages.values() {
+            match self.vuln_repo.find_vulnerabilities(pkg).await {
+                Ok(mut v) => all_vulns.append(&mut v),
+                Err(e) => debug!(package=%pkg.identifier(), error=%e, "vuln lookup failed"),
+            }
+        }
+        // Deduplicate vulnerabilities by id
+        let mut seen = HashSet::new();
+        all_vulns.retain(|v| seen.insert(v.id.as_str().to_string()));
+        let severity_breakdown = crate::domain::SeverityBreakdown::from_vulnerabilities(&all_vulns);
+
+        let internal = RepositoryAnalysisInternalResult {
+            id: uuid::Uuid::new_v4(),
+            owner: input.owner.clone(),
+            repo: input.repo.clone(),
+            requested_ref: input.requested_ref.clone(),
+            commit_sha: input.commit_sha.clone(),
+            files: parsed_files,
+            vulnerabilities: all_vulns.clone(),
+            severity_breakdown,
+            total_files_scanned: filtered.len() as u32,
+            analyzed_files: candidate_files.len() as u32,
+            skipped_files: (filtered.len() - candidate_files.len()) as u32,
+            unique_packages: unique_packages.len() as u32,
+            duration: start.elapsed(),
+            file_errors,
+            rate_limit_remaining: None,
+            truncated: (filtered.len() as u32) >= max_files
+                || total_bytes >= self.config.apis.github.max_total_bytes,
+        };
+        Ok(internal)
+    }
 }
 
 /// Service for orchestrating vulnerability analysis

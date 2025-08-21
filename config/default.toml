@@ -33,6 +33,20 @@ graphql_url = "https://api.github.com/graphql"
 timeout_seconds = 30
 # token = "your_github_token_here"  # Set via environment variable VULNERA__APIS__GHSA__TOKEN
 
+[apis.github]
+base_url = "https://api.github.com"
+# If unset, server may reuse GHSA token when reuse_ghsa_token=true
+token = ""
+reuse_ghsa_token = true
+timeout_seconds = 30
+max_concurrent_file_fetches = 8
+max_files_scanned = 200
+max_total_bytes = 2000000
+max_single_file_bytes = 1000000
+backoff_initial_ms = 500
+backoff_max_retries = 3
+backoff_jitter = true
+
 [logging]
 level = "info"
 format = "json"

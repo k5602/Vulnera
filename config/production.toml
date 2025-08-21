@@ -31,6 +31,19 @@ graphql_url = "https://api.github.com/graphql"
 token = "${GH_TOKEN}"
 timeout_seconds = 20
 
+[apis.github]
+base_url = "https://api.github.com"
+token = "${GH_TOKEN}"
+reuse_ghsa_token = true
+timeout_seconds = 20
+max_concurrent_file_fetches = 8
+max_files_scanned = 200
+max_total_bytes = 2000000
+max_single_file_bytes = 1000000
+backoff_initial_ms = 500
+backoff_max_retries = 3
+backoff_jitter = true
+
 [logging]
 level = "warn"
 format = "json"
