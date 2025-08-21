@@ -175,10 +175,28 @@ impl AggregatingVulnerabilityRepository {
         // Use published_at or current time as fallback
         let published_at = raw.published_at.unwrap_or_else(Utc::now);
 
+        // Ensure summary is not empty - use description or fallback
+        let summary = if raw.summary.trim().is_empty() {
+            if !raw.description.trim().is_empty() {
+                // Use first sentence of description as summary
+                raw.description
+                    .split('.')
+                    .next()
+                    .unwrap_or(&raw.description)
+                    .trim()
+                    .to_string()
+            } else {
+                // Fallback to ID-based summary
+                format!("Vulnerability {}", raw.id)
+            }
+        } else {
+            raw.summary
+        };
+
         // Create the vulnerability
         Vulnerability::new(
             vuln_id,
-            raw.summary,
+            summary,
             raw.description,
             severity,
             affected_packages,
