@@ -31,6 +31,8 @@ curl --proto '=https' --tlsv
 ```
 
 1.2 -sSf https://sh.rustup.rs | sh
+```bash
+
 source ~/.cargo/env
 sudo apt-get install pkg-config libssl-dev # Ubuntu/Debian
 cargo build --release
