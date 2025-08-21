@@ -191,12 +191,26 @@ impl AggregatingVulnerabilityRepository {
     /// Parse severity string to Severity enum with fallback
     fn parse_severity(&self, severity_str: &Option<String>) -> Severity {
         if let Some(severity) = severity_str {
+            // First, try to parse as a float for CVSS scores
+            if let Ok(score) = severity.parse::<f64>() {
+                if score >= 9.0 {
+                    return Severity::Critical;
+                } else if score >= 7.0 {
+                    return Severity::High;
+                } else if score >= 4.0 {
+                    return Severity::Medium;
+                } else if score > 0.0 {
+                    return Severity::Low;
+                }
+            }
+
+            // If parsing as float fails, try string matching
             let severity_lower = severity.to_lowercase();
             match severity_lower.as_str() {
-                "critical" | "9.0" | "10.0" => Severity::Critical,
-                "high" | "7.0" | "8.0" | "8.9" => Severity::High,
-                "medium" | "4.0" | "5.0" | "6.0" | "6.9" => Severity::Medium,
-                "low" | "0.1" | "1.0" | "2.0" | "3.9" => Severity::Low,
+                "critical" => Severity::Critical,
+                "high" => Severity::High,
+                "medium" => Severity::Medium,
+                "low" => Severity::Low,
                 _ => {
                     debug!("Unknown severity '{}', defaulting to Medium", severity);
                     Severity::Medium
@@ -526,5 +540,100 @@ impl VulnerabilityRepository for AggregatingVulnerabilityRepository {
         id: &VulnerabilityId,
     ) -> Result<Option<Vulnerability>, VulnerabilityError> {
         self.query_vulnerability_by_id(id).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infrastructure::api_clients::{ghsa::GhsaClient, nvd::NvdClient, osv::OsvClient};
+
+    #[test]
+    fn test_parse_severity_numeric_scores() {
+        let repo = create_test_repo();
+
+        // Test CVSS numeric scores
+        assert_eq!(
+            repo.parse_severity(&Some("9.8".to_string())),
+            Severity::Critical
+        );
+        assert_eq!(
+            repo.parse_severity(&Some("9.0".to_string())),
+            Severity::Critical
+        );
+        assert_eq!(
+            repo.parse_severity(&Some("8.5".to_string())),
+            Severity::High
+        );
+        assert_eq!(
+            repo.parse_severity(&Some("7.0".to_string())),
+            Severity::High
+        );
+        assert_eq!(
+            repo.parse_severity(&Some("6.5".to_string())),
+            Severity::Medium
+        );
+        assert_eq!(
+            repo.parse_severity(&Some("4.0".to_string())),
+            Severity::Medium
+        );
+        assert_eq!(repo.parse_severity(&Some("3.5".to_string())), Severity::Low);
+        assert_eq!(repo.parse_severity(&Some("0.1".to_string())), Severity::Low);
+    }
+
+    #[test]
+    fn test_parse_severity_string_values() {
+        let repo = create_test_repo();
+
+        // Test string-based severity levels
+        assert_eq!(
+            repo.parse_severity(&Some("critical".to_string())),
+            Severity::Critical
+        );
+        assert_eq!(
+            repo.parse_severity(&Some("CRITICAL".to_string())),
+            Severity::Critical
+        );
+        assert_eq!(
+            repo.parse_severity(&Some("High".to_string())),
+            Severity::High
+        );
+        assert_eq!(
+            repo.parse_severity(&Some("medium".to_string())),
+            Severity::Medium
+        );
+        assert_eq!(repo.parse_severity(&Some("LOW".to_string())), Severity::Low);
+    }
+
+    #[test]
+    fn test_parse_severity_edge_cases() {
+        let repo = create_test_repo();
+
+        // Test edge cases and fallbacks
+        assert_eq!(
+            repo.parse_severity(&Some("unknown".to_string())),
+            Severity::Medium
+        );
+        assert_eq!(repo.parse_severity(&Some("".to_string())), Severity::Medium);
+        assert_eq!(repo.parse_severity(&None), Severity::Medium);
+        assert_eq!(
+            repo.parse_severity(&Some("invalid_number".to_string())),
+            Severity::Medium
+        );
+    }
+
+    fn create_test_repo() -> AggregatingVulnerabilityRepository {
+        // Create mock clients for testing
+        let osv_client = Arc::new(OsvClient::new("https://api.osv.dev".to_string()));
+        let nvd_client = Arc::new(NvdClient::new(
+            "https://services.nvd.nist.gov".to_string(),
+            None,
+        ));
+        let ghsa_client = Arc::new(GhsaClient::new(
+            "test_token".to_string(),
+            "https://api.github.com/graphql".to_string(),
+        ));
+
+        AggregatingVulnerabilityRepository::new(osv_client, nvd_client, ghsa_client)
     }
 }
