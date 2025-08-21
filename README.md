@@ -133,6 +133,7 @@ Early mapping to domain/application errors, graceful degradation, and clear API 
 ## 🚢 Deployment
 
 - **Docker:**
+
   ```bash
   docker build -t vulnera-rust .
   docker run -p 3000:3000 vulnera-rust
