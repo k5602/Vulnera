@@ -32,6 +32,7 @@ jobs:
       - name: Build Docker image
         run: |
           docker build \
+            --file scripts/docker/Dockerfile \
             -t ecrvubnera.azurecr.io/vulnera-app:latest \
             -t ecrvubnera.azurecr.io/vulnera-app:${{ github.sha }} .
 
