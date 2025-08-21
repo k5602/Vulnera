@@ -13,7 +13,7 @@ use vulnera_rust::{
         cache::file_cache::FileCacheRepository,
         parsers::ParserFactory,
         repositories::AggregatingVulnerabilityRepository,
-    repository_source::{GitHubRepositoryClient, RepositorySourceClient},
+        repository_source::{GitHubRepositoryClient, RepositorySourceClient},
     },
     init_tracing,
     presentation::{AppState, create_router},
@@ -78,7 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some(config.apis.github.base_url.clone()),
             config.apis.github.timeout_seconds,
             config.apis.github.reuse_ghsa_token,
-        ).unwrap_or_else(|e| {
+        ).await.unwrap_or_else(|e| {
             tracing::warn!(error=?e, "Failed to init GitHubRepositoryClient, repository analysis disabled");
             GitHubRepositoryClient::new(
                 octocrab::Octocrab::builder().build().expect("octocrab build"),
@@ -88,12 +88,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
         })
     );
-    let repository_analysis_service: Option<Arc<dyn vulnera_rust::application::RepositoryAnalysisService>> = Some(Arc::new(
+    let repository_analysis_service: Option<
+        Arc<dyn vulnera_rust::application::RepositoryAnalysisService>,
+    > = Some(Arc::new(
         vulnera_rust::application::RepositoryAnalysisServiceImpl::new(
             github_client.clone(),
             vulnerability_repository.clone(),
             parser_factory.clone(),
-        )
+            Arc::new(config.clone()),
+        ),
     ));
 
     // Create popular package service with config
@@ -111,7 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         report_service,
         vulnerability_repository,
         popular_package_service,
-    repository_analysis_service,
+        repository_analysis_service,
     };
 
     // Create router

@@ -56,7 +56,8 @@ toml = "0.9.5"
 serde_yaml = "0.9.34-deprecated"
 regex = "1.11.1"
 semver = { version = "1.0", features = ["serde"] }
-octocrab = { version = "0.32", default-features = false, features = ["rustls"] }
+octocrab = { version = "0.44" }
+base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3.21.0"

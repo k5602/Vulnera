@@ -101,8 +101,10 @@ pub trait RepositoryAnalysisService: Send + Sync {
     ) -> Result<RepositoryAnalysisInternalResult, ApplicationError>;
 }
 
+use crate::config::Config;
 use crate::infrastructure::ParserFactory;
 use crate::infrastructure::repository_source::RepositorySourceClient;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// Initial scaffold implementation (logic will be filled in subsequent commits)
@@ -113,6 +115,7 @@ pub struct RepositoryAnalysisServiceImpl<
     source_client: Arc<C>,
     vuln_repo: Arc<R>,
     parser_factory: Arc<ParserFactory>,
+    config: Arc<Config>,
 }
 
 impl<C: RepositorySourceClient, R: VulnerabilityRepository> RepositoryAnalysisServiceImpl<C, R> {
@@ -120,11 +123,13 @@ impl<C: RepositorySourceClient, R: VulnerabilityRepository> RepositoryAnalysisSe
         source_client: Arc<C>,
         vuln_repo: Arc<R>,
         parser_factory: Arc<ParserFactory>,
+        config: Arc<Config>,
     ) -> Self {
         Self {
             source_client,
             vuln_repo,
             parser_factory,
+            config,
         }
     }
 }
@@ -141,32 +146,141 @@ where
         input: RepositoryAnalysisInput,
     ) -> Result<RepositoryAnalysisInternalResult, ApplicationError> {
         let start = std::time::Instant::now();
+        let max_files = input
+            .max_files
+            .min(self.config.apis.github.max_files_scanned as u32);
         let files = self
             .source_client
             .list_repository_files(
                 &input.owner,
                 &input.repo,
                 input.requested_ref.as_deref(),
-                input.max_files,
-                5_000_000,
+                max_files,
+                self.config.apis.github.max_total_bytes,
             )
             .await
             .map_err(|e| ApplicationError::Configuration {
                 message: format!("repository source error: {e}"),
             })?;
-
-        // Placeholder: pretend we fetched + parsed none
-        let parsed_files: Vec<RepositoryFileResultInternal> = files
-            .iter()
-            .map(|f| RepositoryFileResultInternal {
-                path: f.path.clone(),
-                ecosystem: self.parser_factory.detect_ecosystem(&f.path),
-                packages: vec![],
-                error: None,
+        // Apply include/exclude filters
+        let filtered: Vec<_> = files
+            .into_iter()
+            .filter(|f| {
+                if let Some(ref includes) = input.include_paths {
+                    if !includes.iter().any(|p| f.path.starts_with(p)) {
+                        return false;
+                    }
+                }
+                if let Some(ref excludes) = input.exclude_paths {
+                    if excludes.iter().any(|p| f.path.starts_with(p)) {
+                        return false;
+                    }
+                }
+                true
             })
             .collect();
 
-        let vulnerabilities: Vec<Vulnerability> = Vec::new();
+        // Identify candidate dependency files (those with a parser)
+        let mut candidate_files = Vec::new();
+        let mut total_bytes: u64 = 0;
+        for f in &filtered {
+            if f.size > self.config.apis.github.max_single_file_bytes {
+                continue; // skip oversized file
+            }
+            if let Some(_) = self.parser_factory.create_parser(&f.path) {
+                if total_bytes + f.size > self.config.apis.github.max_total_bytes {
+                    break; // enforce total bytes cap
+                }
+                total_bytes += f.size;
+                candidate_files.push(f.clone());
+            }
+        }
+
+        // Fetch contents for candidate files
+        let fetched = if candidate_files.is_empty() {
+            Vec::new()
+        } else {
+            self.source_client
+                .fetch_file_contents(
+                    &input.owner,
+                    &input.repo,
+                    &candidate_files,
+                    input.requested_ref.as_deref(),
+                    self.config.apis.github.max_single_file_bytes,
+                    self.config.apis.github.max_concurrent_file_fetches,
+                )
+                .await
+                .map_err(|e| ApplicationError::Configuration {
+                    message: format!("repository source error: {e}"),
+                })?
+        };
+
+        // Map path -> content for quick lookup
+        let mut content_map: HashMap<String, String> = HashMap::new();
+        for fc in fetched {
+            content_map.insert(fc.path, fc.content);
+        }
+
+        // Parse files
+        let mut parsed_files: Vec<RepositoryFileResultInternal> = Vec::new();
+        let mut unique_packages: HashMap<String, Package> = HashMap::new();
+        let mut file_errors = 0u32;
+
+        for file in &candidate_files {
+            let ecosystem = self.parser_factory.detect_ecosystem(&file.path);
+            if let Some(content) = content_map.get(&file.path) {
+                if let Some(parser) = self.parser_factory.create_parser(&file.path) {
+                    match parser.parse_file(content).await {
+                        Ok(pkgs) => {
+                            if input.return_packages {
+                                for p in &pkgs {
+                                    unique_packages
+                                        .entry(p.identifier())
+                                        .or_insert_with(|| p.clone());
+                                }
+                            }
+                            parsed_files.push(RepositoryFileResultInternal {
+                                path: file.path.clone(),
+                                ecosystem,
+                                packages: if input.return_packages { pkgs } else { vec![] },
+                                error: None,
+                            });
+                        }
+                        Err(e) => {
+                            file_errors += 1;
+                            parsed_files.push(RepositoryFileResultInternal {
+                                path: file.path.clone(),
+                                ecosystem,
+                                packages: vec![],
+                                error: Some(e.to_string()),
+                            });
+                        }
+                    }
+                }
+            } else {
+                // content missing (fetch failed)
+                file_errors += 1;
+                parsed_files.push(RepositoryFileResultInternal {
+                    path: file.path.clone(),
+                    ecosystem,
+                    packages: vec![],
+                    error: Some("content not fetched".into()),
+                });
+            }
+        }
+
+        // Vulnerability lookup
+        let mut all_vulns: Vec<Vulnerability> = Vec::new();
+        for pkg in unique_packages.values() {
+            match self.vuln_repo.find_vulnerabilities(pkg).await {
+                Ok(mut v) => all_vulns.append(&mut v),
+                Err(e) => debug!(package=%pkg.identifier(), error=%e, "vuln lookup failed"),
+            }
+        }
+        // Deduplicate vulnerabilities by id
+        let mut seen = HashSet::new();
+        all_vulns.retain(|v| seen.insert(v.id.as_str().to_string()));
+        let severity_breakdown = crate::domain::SeverityBreakdown::from_vulnerabilities(&all_vulns);
 
         let internal = RepositoryAnalysisInternalResult {
             id: uuid::Uuid::new_v4(),
@@ -175,18 +289,17 @@ where
             requested_ref: input.requested_ref.clone(),
             commit_sha: "".into(),
             files: parsed_files,
-            vulnerabilities: vulnerabilities.clone(),
-            severity_breakdown: crate::domain::SeverityBreakdown::from_vulnerabilities(
-                &vulnerabilities,
-            ),
-            total_files_scanned: files.len() as u32,
-            analyzed_files: files.len() as u32,
-            skipped_files: 0,
-            unique_packages: 0, // will compute when packages populated
+            vulnerabilities: all_vulns.clone(),
+            severity_breakdown,
+            total_files_scanned: filtered.len() as u32,
+            analyzed_files: candidate_files.len() as u32,
+            skipped_files: (filtered.len() - candidate_files.len()) as u32,
+            unique_packages: unique_packages.len() as u32,
             duration: start.elapsed(),
-            file_errors: 0,
+            file_errors,
             rate_limit_remaining: None,
-            truncated: false,
+            truncated: (filtered.len() as u32) >= max_files
+                || total_bytes >= self.config.apis.github.max_total_bytes,
         };
         Ok(internal)
     }
