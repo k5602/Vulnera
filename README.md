@@ -1,857 +1,229 @@
-# Vulnera Rust – Vulnerability Analysis API
+# Vulnera Rust – High-Performance Vulnerability Analysis API
 
-A high-performance vulnerability analysis API built with Rust. Vulnera analyzes dependency manifests across multiple ecosystems, aggregates results from OSV/NVD/GHSA, and exposes a clean HTTP API with OpenAPI docs. This Rust backend replaces the original Python implementation with better performance, scalability, and ecosystem coverage.
-
-## Features
-
-- **🚀 High Performance**: Built with Rust and Tokio for maximum concurrency and speed
-- **🌐 Multi-Ecosystem Support**: Analyze dependencies from npm, PyPI, Maven/Gradle, Cargo, Go, and Packagist
-- **🏗️ Domain-Driven Design**: Clean architecture with separation of concerns for maintainability
-- **📊 Multiple Data Sources**: Integrates with OSV, NVD, and GitHub Security Advisories
-- **⚡ Async Architecture**: Full async/await implementation for optimal performance
-- **💾 Smart Caching**: Filesystem-based caching with configurable TTL
-- **🔒 Security First**: Built-in rate limiting, input validation, and secure API handling
-- **📖 OpenAPI Documentation**: Auto-generated Swagger UI for easy API exploration
-- **🐳 Container Ready**: Docker support with multi-stage builds for production deployment
-- **🔧 Developer Friendly**: Comprehensive tooling, linting, and development environment setup
-
-## Requirements
-
-- **Rust**: 1.70.0 or higher
-- **System Dependencies**: OpenSSL development libraries
-- **Internet Connection**: Required for vulnerability database API calls
-- **Memory**: Minimum 512MB RAM (2GB+ recommended for production)
-- **Storage**: ~100MB for application + cache storage
-
-
-## 🚀 Executive Summary
-
-# 🌐 Vulnera Rust - AWS Architecture Overview
-
-![Architecture Diagram](./AWS2.png)
+Vulnera is a fast, scalable, multi-ecosystem vulnerability analysis toolkit and testing platform built in Rust. While it excels at analyzing dependency manifests, Vulnera is intended as a comprehensive vulnerability analysis and testing toolkit—supporting not only dependency scanning, but also future features like codebase auditing, security testing, and integration with CI/CD workflows. It aggregates results from OSV, NVD, and GHSA, and exposes a robust HTTP API with OpenAPI docs. Designed for cloud-native workflows, Vulnera leverages async Rust, domain-driven design, and smart caching for reliability and speed.
 
 ---
 
-## 🚀 Executive Summary
+## 🚀 Key Features
 
-This diagram illustrates a **highly scalable, resilient, and serverless architecture** for a modern web application on **AWS**.  
-It features two automated workflows:
-
-1. **User Request Flow** – real-time application functionality  
-2. **CI/CD Deployment Flow** – continuous deployment for engineering velocity
-
-**Key Principles:**
-- Serverless-first design → focus on business logic, not infrastructure
-- Decoupled frontend & backend → independent development, deployment, and scaling
-
----
-
-## 🏗️ Architectural Deep Dive
-
-### 1️⃣ Global Delivery & Edge Layer
-**![CloudFront](https://img.shields.io/badge/AWS-CloudFront-orange?logo=amazon-aws&logoColor=white)**  
-
-> **Benefits:**
-> - ⚡ **Performance:** Edge caching for low latency  
-> - 🛡️ **Security:** DDoS protection + AWS WAF  
-> - 💰 **Cost Optimization:** Fewer origin requests → lower costs
+- **Multi-Ecosystem Support:** npm, PyPI, Maven/Gradle, Cargo, Go, Packagist, and more
+- **Aggregated Vulnerability Data:** Combines OSV, NVD, and GitHub Security Advisories
+- **Async & Concurrent:** Built with Tokio for high throughput and bounded concurrency
+- **Smart Caching:** Filesystem-based, TTL-configurable cache for reduced API calls
+- **Domain-Driven Design:** Clean separation of domain, application, infrastructure, and presentation layers
+- **OpenAPI Documentation:** Auto-generated Swagger UI for easy API exploration
+- **Secure by Default:** Input validation, rate limiting, and secure API handling
+- **Container Ready:** Docker and Kubernetes support for production deployments
+- **Developer Friendly:** Comprehensive tooling, linting, and CI/CD integration
 
 ---
 
-### 2️⃣ Frontend Hosting & Application Layer
-**![Amplify](https://img.shields.io/badge/AWS-Amplify-yellow?logo=amazon-aws&logoColor=white)**  
+## ⚡ Quick Start
 
-> **Advantages:**
-> - Git-integrated deployments  
-> - Atomic updates on every push → zero downtime
+### Installation
 
----
+#### From Source
 
-### 3️⃣ API & Ingress Layer
-**![API Gateway](https://img.shields.io/badge/AWS-API%20Gateway-red?logo=amazon-aws&logoColor=white)**  
-
-> **Features:**
-> - 🚦 **Request Routing:** Routes to correct Lambda  
-> - 🛑 **Traffic Management:** Throttling, caching, rate limiting  
-> - 🔐 **Security:** Auth & authorization (JWT/IAM)
-
----
-
-### 4️⃣ Serverless Compute Layer
-**![Lambda](https://img.shields.io/badge/AWS-Lambda-purple?logo=amazon-aws&logoColor=white) & ![ECR](https://img.shields.io/badge/AWS-ECR-blue?logo=amazon-aws&logoColor=white)**  
-
-- **Lambda:** Event-driven compute, auto-scalable  
-- **ECR:** Containerized Lambda deployments
-
-> **Why Docker for Lambda?**
-> - 📦 Handles complex dependencies & custom runtimes  
-> - ✅ Immutable artifacts for consistent deployments  
-> - ⚙️ Aligns with modern DevOps/container workflows
-
----
-
-### 5️⃣ Security & Observability
-- **IAM Roles:** Least privilege for Lambda functions  
-- **Amazon CloudWatch:** Logs, metrics, performance monitoring, alerting
-
----
-
-## 🔄 Core Workflows
-
-### 1️⃣ CI/CD Deployment Lifecycle
-
-| Step | Description |
-|------|-------------|
-| 1️⃣  Code Commit | Developer pushes changes to GitHub |
-| 2️⃣  Workflow Trigger | `git push` triggers **GitHub Actions** |
-| 3️⃣  Parallel Builds | **Frontend:** Build SPA → Deploy to **Amplify** <br> **Backend:** Build Docker → Push to **ECR** → Update Lambda |
-
----
-
-### 2️⃣ User Request Lifecycle
-
-| Step | Description |
-|------|-------------|
-| Initiation | User triggers API call via frontend (Amplify + CloudFront) |
-| Ingress | HTTPS request → **API Gateway** (auth & security) |
-| Invocation | Gateway calls **Lambda** function |
-| Execution | Lambda runs containerized code under **IAM Role** |
-| Response | JSON response sent back to API Gateway |
-| Egress | API Gateway → User browser updates UI |
-| Logging | Metrics & logs streamed to **CloudWatch** |
-
----
-
-## 🎯 Benefits
-
-- **Scalable:** Auto-scaling serverless services  
-- **Resilient:** Stateless design, CDN caching, multi-AZ support  
-- **Secure:** IAM, WAF, least privilege principles  
-- **Operationally Efficient:** CI/CD automation, serverless management, CloudWatch observability
-
----
-
-*This setup ensures modern, cloud-native deployment practices with focus on performance, security, and developer productivity.*
-
-
-## Installation
-
-### From Source
-
-1. **Clone the repository:**
 ```bash
 git clone https://github.com/vulnera/vulnera.git
 cd vulnera
+curl --proto '=https' --tlsv
 ```
 
-2. **Install Rust** (if not already installed):
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+1.2 -sSf https://sh.rustup.rs | sh
 source ~/.cargo/env
-```
-
-3. **Install system dependencies:**
-
-**Ubuntu/Debian:**
-```bash
-sudo apt-get update
-sudo apt-get install pkg-config libssl-dev
-```
-
-**macOS:**
-```bash
-brew install openssl pkg-config
-```
-
-**Windows:**
-```bash
-# Install Visual Studio Build Tools or Visual Studio Community
-# OpenSSL will be handled by vcpkg automatically
-```
-
-4. **Build the application:**
-```bash
+sudo apt-get install pkg-config libssl-dev # Ubuntu/Debian
 cargo build --release
-```
-
-5. **Run the application:**
-```bash
 cargo run
-# or
-./target/release/vulnera-rust
-```
 
-### Using Docker
+````
+
+#### Using Docker
 
 ```bash
-# Build the image
 docker build -t vulnera-rust .
-
-# Run the container
 docker run -p 3000:3000 vulnera-rust
+````
 
-# Or use docker-compose
-cd scripts/docker && docker-compose up
-```
+---
 
-### Development Setup
+## 🛠️ Usage
 
-```bash
-# Install development dependencies
-make -C scripts/build_workflow install-deps
+- **API Docs:** [http://localhost:3000/docs](http://localhost:3000/docs)
+- **Health Check:** [http://localhost:3000/health](http://localhost:3000/health)
 
-# Setup pre-commit hooks
-pre-commit install
-
-# Run in development mode with auto-reload
-make dev
-```
-
-## Usage
-
-### Starting the Server
+### Example: Analyze a Dependency File
 
 ```bash
-# Using cargo
-cargo run
-
-# Using the binary
-./target/release/vulnera-rust
-
-# With custom configuration
-VULNERA__SERVER__PORT=8080 cargo run
-
-# Using Docker
-docker run -p 3000:3000 -e VULNERA__SERVER__PORT=3000 vulnera-rust
+curl -X POST http://localhost:3000/api/v1/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"file_content": "django==3.2.0\nrequests>=2.25.0", "ecosystem": "PyPI", "filename": "requirements.txt"}'
 ```
 
-### API Endpoints
-
-Once the server is running, you can access:
-
-- **API Documentation**: <http://localhost:3000/docs>
-- **Health Check**: <http://localhost:3000/health>
-- **Detailed Health**: <http://localhost:3000/health/detailed>
-- **Prometheus Metrics**: <http://localhost:3000/metrics>
-
-### Analyzing Dependencies (single file)
-
-#### POST /api/v1/analyze
-
-```bash
-# Analyze a Python requirements.txt file
-curl -X POST http://localhost:3000/api/v1/analyze \
-  -H "Content-Type: application/json" \
-  -d '{
-    "file_content": "django==3.2.0\nrequests>=2.25.0\nnumpy~=1.21.0",
-    "ecosystem": "PyPI",
-    "filename": "requirements.txt"
-  }'
-
-# Analyze a Node.js package.json
-curl -X POST http://localhost:3000/api/v1/analyze \
-  -H "Content-Type: application/json" \
-  -d '{
-    "file_content": "{\"dependencies\": {\"express\": \"4.17.1\", \"lodash\": \"4.17.20\"}}",
-    "ecosystem": "npm",
-    "filename": "package.json"
-  }'
-
-# Analyze a Rust Cargo.toml
-curl -X POST http://localhost:3000/api/v1/analyze \
-  -H "Content-Type: application/json" \
-  -d '{
-    "file_content": "[dependencies]\nserde = \"1.0\"\ntokio = { version = \"1.0\", features = [\"full\"] }",
-    "ecosystem": "Cargo",
-    "filename": "Cargo.toml"
-  }'
-```
-
-### Analyze an entire GitHub repository
-
-POST /api/v1/analyze/repository scans supported manifests in a public GitHub repo (optionally filtered by paths):
+### Example: Analyze a GitHub Repository
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/analyze/repository \
   -H "Content-Type: application/json" \
-  -d '{
-    "repository_url": "https://github.com/rust-lang/cargo",
-    "ref": "main",
-    "include_paths": ["src/", "crates/"],
-    "exclude_paths": ["tests/"],
-    "return_packages": false
-  }'
+  -d '{"repository_url": "https://github.com/rust-lang/cargo", "ref": "main"}'
 ```
 
-Notes:
+---
 
-- Server-side limits clamp file count and total bytes per repo scan (see config.github caps).
-- Configure a GitHub token for higher rate limits (see Configuration).
+## 📦 Supported Ecosystems & File Formats
 
-### Getting Vulnerability Details
+- **Python:** `requirements.txt`, `Pipfile`, `pyproject.toml`
+- **Node.js:** `package.json`, `package-lock.json`, `yarn.lock`
+- **Java:** `pom.xml`, `build.gradle`
+- **Rust:** `Cargo.toml`, `Cargo.lock`
+- **Go:** `go.mod`, `go.sum`
+- **PHP:** `composer.json`, `composer.lock`
 
-#### GET /api/v1/vulnerabilities/{id}
+---
 
-```bash
-curl http://localhost:3000/api/v1/vulnerabilities/GHSA-xxxx-xxxx-xxxx
-```
+## ⚙️ Configuration
 
-### Retrieving Analysis Reports
+- Configurable via TOML files in `config/` and environment variables (prefix `VULNERA__`)
+- Profiles: `development`, `staging`, `production` (set via `ENV`)
+- Example environment overrides:
+  ```bash
+  VULNERA__SERVER__PORT=8080
+  VULNERA__CACHE__TTL_HOURS=24
+  VULNERA__APIS__NVD__API_KEY=your_nvd_api_key
+  VULNERA__APIS__GHSA__TOKEN=your_github_token
+  ```
 
-#### GET /api/v1/reports/{id}
+---
 
-```bash
-curl http://localhost:3000/api/v1/reports/550e8400-e29b-41d4-a716-446655440000
-```
+## 🏗️ Architecture & Design
 
-### Environment Variables
+Vulnera is built with **Domain-Driven Design (DDD)** and a layered architecture:
 
-Server configuration is file- and env-driven. Key overrides (prefix VULNERA__, double underscores between sections):
+- **Domain Layer:** Pure business logic, entities, value objects
+- **Application Layer:** Use cases, orchestration, error mapping
+- **Infrastructure Layer:** API clients, parsers, caching, repositories
+- **Presentation Layer:** HTTP API, DTOs, OpenAPI, middleware
 
-```bash
-# Server
-VULNERA__SERVER__HOST=0.0.0.0
-VULNERA__SERVER__PORT=3000
-VULNERA__SERVER__ENABLE_DOCS=true
-VULNERA__SERVER__REQUEST_TIMEOUT_SECONDS=45
-
-# Cache
-VULNERA__CACHE__DIRECTORY=.vulnera_cache
-VULNERA__CACHE__TTL_HOURS=24
-
-# External APIs (tokens optional but recommended)
-VULNERA__APIS__NVD__API_KEY=your_nvd_api_key_here
-VULNERA__APIS__GHSA__TOKEN=ghp_xxx
-VULNERA__APIS__GITHUB__TOKEN=ghp_xxx  # used for repository analysis; if omitted and reuse_ghsa_token=true, GHSA token is reused
-
-# Logging
-VULNERA__LOGGING__LEVEL=info
-VULNERA__LOGGING__FORMAT=json
-
-# Select profile
-ENV=development|staging|production
-```
-
-## Supported Ecosystems & File Formats
-
- 
-### Python (PyPI)
-
-- `requirements.txt`
-- `Pipfile`
-- `pyproject.toml`
-
- 
-### Node.js (npm)
-
-- `package.json`
-- `package-lock.json`
-- `yarn.lock`
-
- 
-### Java (Maven/Gradle)
-
-- `pom.xml`
-- `build.gradle`
-- `build.gradle.kts`
-
- 
-### Rust (Cargo)
-
-- `Cargo.toml`
-- `Cargo.lock`
-
- 
-### Go
-
-- `go.mod`
-- `go.sum`
-
- 
-### PHP (Packagist)
-
-- `composer.json`
-- `composer.lock`
-
-<!-- Ruby and .NET are not currently supported by built-in parsers. Add new parsers under src/infrastructure/parsers to enable. -->
-
-## API Response Examples
-
-### Analysis Response
-
-```json
-{
-  "id": "550e8400-e29b-41d4-a716-446655440000",
-  "vulnerabilities": [
-    {
-      "id": "GHSA-xxxx-xxxx-xxxx",
-      "summary": "Cross-site Scripting in Django",
-      "description": "Django before 3.2.15 allows XSS via user-supplied data...",
-      "severity": "High",
-      "affected_packages": [
-        {
-          "name": "django",
-          "version": "3.2.0",
-          "ecosystem": "PyPI",
-          "vulnerable_ranges": [">=3.2.0,<3.2.15"],
-          "fixed_versions": ["3.2.15"]
-        }
-      ],
-      "references": [
-        "https://github.com/django/django/security/advisories/GHSA-xxxx-xxxx-xxxx"
-      ],
-      "published_at": "2023-08-01T10:00:00Z",
-      "sources": ["OSV", "GHSA"]
-    }
-  ],
-  "metadata": {
-    "total_packages": 15,
-    "vulnerable_packages": 3,
-    "total_vulnerabilities": 5,
-    "severity_breakdown": {
-      "critical": 1,
-      "high": 2,
-      "medium": 1,
-      "low": 1
-    },
-    "analysis_duration_ms": 1250,
-    "sources_queried": ["OSV", "NVD", "GHSA"]
-  },
-  "pagination": {
-    "page": 1,
-    "per_page": 50,
-    "total": 5,
-    "total_pages": 1,
-    "has_next": false,
-    "has_prev": false
-  }
-}
-```
-
-### Health Check Response
-
-```json
-{
-  "status": "healthy",
-  "version": "0.1.0",
-  "timestamp": "2024-01-15T10:30:00Z",
-  "details": {
-    "dependencies": {
-      "osv_api": "healthy",
-      "nvd_api": "healthy",
-      "ghsa_api": "healthy"
-    }
-  }
-}
-```
-
-### Repository Analysis Response (excerpt)
-
-The repository scan responds with repository descriptor, per-file results, and aggregated vulnerabilities. Example excerpt:
-
-```json
-{
-  "id": "550e8400-e29b-41d4-a716-446655440000",
-  "repository": {
-    "owner": "rust-lang",
-    "repo": "cargo",
-    "requested_ref": "main",
-    "commit_sha": "a1b2c3d4...",
-    "source_url": "https://github.com/rust-lang/cargo"
-  },
-  "metadata": {
-    "total_files_scanned": 120,
-    "analyzed_files": 35,
-    "skipped_files": 85,
-    "unique_packages": 98,
-    "total_vulnerabilities": 12,
-    "duration_ms": 2500,
-    "truncated": false
-  }
-}
-```
-
-## Configuration
-
-### Environment Profiles & Variables
-
-The application supports three environment profiles selected via the `ENV` variable: `development`, `staging`, and `production`.
-
-Profile goals:
-
-- Development: fast iteration, verbose logs, docs enabled, permissive CORS.
-- Staging: mirrors production with docs enabled for QA, restricted CORS.
-- Production: hardened; Swagger UI disabled (unless explicitly enabled), strict CORS, lean logging.
-
-Configuration files loaded in order (later overrides earlier):
-
-1. `config/default.toml`
-2. `config/local.toml` (optional, git-ignored)
-3. `config/{ENV}.toml` if `ENV` is set
-4. Environment variables with prefix `VULNERA__` (highest precedence)
-
-Key server and GitHub repository analysis fields:
-
-- `enable_docs` (bool): Expose Swagger UI at `/docs` when true.
-- `request_timeout_seconds` (u64): Global per-request timeout.
-- `allowed_origins` (array): CORS origins (use `[*]` only in development).
-- `apis.github`:
-  - `token` (string, optional): Personal access token for repository scans.
-  - `reuse_ghsa_token` (bool): If true, reuse GHSA token for GitHub REST.
-  - `max_concurrent_file_fetches`, `max_files_scanned`, `max_total_bytes`, `max_single_file_bytes` caps.
-  - `backoff_*` knobs for rate-limit retries.
-
-```bash
-# Server Configuration
-VULNERA__SERVER__HOST=0.0.0.0
-VULNERA__SERVER__PORT=3000
-# Disable docs in production explicitly (default in production.toml is false)
-VULNERA__SERVER__ENABLE_DOCS=false
-# Override timeout if needed
-VULNERA__SERVER__REQUEST_TIMEOUT_SECONDS=45
-# Comma separated is not supported; set via config file for multiple origins
-
-# Cache Configuration
-VULNERA__CACHE__DIRECTORY=.vulnera_cache
-VULNERA__CACHE__TTL_HOURS=24
-
-# API Keys (optional but recommended for better rate limits)
-VULNERA__APIS__NVD__API_KEY=your_nvd_api_key_here
-VULNERA__APIS__GHSA__TOKEN=your_github_token_here
-
-# Logging Configuration
-VULNERA__LOGGING__LEVEL=info
-VULNERA__LOGGING__FORMAT=json
-
-# Select profile
-ENV=production
-```
-
-### Configuration Files
-
-Create `config/local.toml` for local overrides:
-
-```toml
-[server]
-host = "127.0.0.1"
-port = 8080
-
-[apis.nvd]
-api_key = "your_api_key_here"
-
-[apis.ghsa]
-token = "your_github_token_here"
-
-[logging]
-level = "debug"
-format = "pretty"
-```
-
-## Development
-
-### Available Make Commands
-
-```bash
-# Development
-make build              # Build the project
-make test               # Run tests
-make check              # Run cargo check
-make lint               # Run clippy linter
-make format             # Format code with rustfmt
-make run                # Run the application
-make dev                # Run with file watching
-
-# Quality Assurance
-make ci-check           # Run all CI checks
-make pre-commit         # Run pre-commit checks
-make audit              # Run security audit
-make coverage           # Generate test coverage
-
-# Docker
-make docker-build       # Build Docker image
-make docker-run         # Run Docker container
-
-# Documentation
-make docs               # Generate and open documentation
-```
-
-### Project Structure
-
-```
-vulnera-rust/
-├── src/
-│   ├── domain/              # Domain entities and business logic
-│   │   ├── entities.rs      # Core business entities
-│   │   ├── value_objects.rs # Immutable value objects
-│   │   ├── services.rs      # Domain services
-│   │   └── errors.rs        # Domain-specific errors
-│   ├── application/         # Use cases and application services
-│   │   ├── services.rs      # Application service traits
-│   │   ├── use_cases.rs     # Business use cases
-│   │   └── errors.rs        # Application errors
-│   ├── infrastructure/      # External concerns
-│   │   ├── api_clients/     # External API clients
-│   │   ├── cache/           # Caching implementations
-│   │   ├── parsers/         # File format parsers
-│   │   └── repositories.rs  # Data access implementations
-│   ├── presentation/        # Web API layer
-│   │   ├── controllers/     # HTTP request handlers
-│   │   ├── models.rs        # API request/response models
-│   │   ├── middleware.rs    # HTTP middleware
-│   │   └── routes.rs        # Route definitions
-│   ├── config.rs            # Configuration management
-│   ├── logging.rs           # Logging setup
-│   ├── lib.rs               # Library root
-│   └── main.rs              # Application entry point
-├── config/                  # Configuration files
-├── .github/workflows/       # CI/CD pipelines
-├── .vscode/                 # VS Code settings
-├── Dockerfile               # Container definition
-├── docker-compose.yml       # Development compose
-├── Makefile                 # Development commands
-└── README.md                # This file
-```
-
-## Architecture
-
-### Domain-Driven Design
-
-The application follows DDD principles with clear separation of concerns:
-
-- **Domain Layer**: Core business logic, entities, and domain services
-- **Application Layer**: Use cases, application services, and orchestration
-- **Infrastructure Layer**: External API clients, caching, and data persistence
-- **Presentation Layer**: HTTP API, request/response handling, and OpenAPI documentation
-
-### Key Components
-
-1. **Multi-Ecosystem Parsers**: Pluggable parsers for different package managers
-2. **Vulnerability Aggregation**: Combines data from multiple security databases
-3. **Async Processing**: Full async/await for maximum concurrency
-4. **Smart Caching**: Reduces API calls with intelligent cache management
-5. **Rate Limiting**: Built-in protection against API rate limits
-6. **Error Handling**: Comprehensive error types with graceful degradation
-
-## Vulnerability Data Sources
-
-### OSV (Open Source Vulnerability) Database
-
-- **Base URL**: <https://api.osv.dev/v1>
-- **Coverage**: Multi-ecosystem vulnerability database
-- **Rate Limiting**: Built-in rate limiting with exponential backoff
-- **Documentation**: <https://osv.dev/>
-
-### National Vulnerability Database (NVD)
-
-- **Base URL**: <https://services.nvd.nist.gov/rest/json>
-- **Coverage**: Comprehensive CVE database
-- **API Key**: Optional but recommended for higher rate limits
-- **Documentation**: <https://nvd.nist.gov/developers>
-
-### GitHub Security Advisories (GHSA)
-
-- **Base URL**: <https://api.github.com/graphql>
-- **Coverage**: GitHub-specific security advisories
-- **Authentication**: GitHub token required
-- **Documentation**: <https://docs.github.com/en/graphql>
-
-## Vulnerability Severity Levels
-
-- **CRITICAL**: CVSS score 9.0-10.0 (Immediate action required)
-- **HIGH**: CVSS score 7.0-8.9 (High priority fix)
-- **MEDIUM**: CVSS score 4.0-6.9 (Medium priority fix)
-- **LOW**: CVSS score 0.1-3.9 (Low priority fix)
-- **UNKNOWN**: No CVSS score available
-
-## Error Handling
-
-The script includes comprehensive error handling for:
-
-- File not found errors
-- Network connectivity issues
-- API rate limiting and timeouts
-- Invalid file formats
-- JSON parsing errors
-- Session management failures
-
-## Performance & Scalability
-
-- **Concurrent Processing**: Handles multiple analysis requests simultaneously
-- **Async I/O**: Non-blocking operations for maximum throughput
-- **Smart Caching**: Configurable TTL reduces redundant API calls
-- **Rate Limiting**: Respects external API limits automatically
-- **Memory Efficient**: Streaming processing for large dependency files
-- **Horizontal Scaling**: Stateless design supports load balancing
-
-## Contributing
-
-We welcome contributions! Please follow these steps:
-
-1. **Fork the repository**
-2. **Create a feature branch**: `git checkout -b feature/amazing-feature`
-3. **Follow the coding standards**:
-   - Run `make format` to format code
-   - Run `make lint` to check for issues
-   - Run `make test` to ensure tests pass
-4. **Write tests** for new functionality
-5. **Update documentation** as needed
-6. **Commit your changes**: `git commit -m 'Add amazing feature'`
-7. **Push to the branch**: `git push origin feature/amazing-feature`
-8. **Open a Pull Request**
-
-### Development Guidelines
-
-- Follow Rust best practices and idioms
-- Maintain the Domain-Driven Design architecture
-- Write comprehensive tests for new features
-- Update OpenAPI documentation for API changes
-- Use conventional commit messages
-
-## Deployment
-
-### Production Deployment
-
-```bash
-# Build optimized binary
-cargo build --release
-
-# Run with production configuration
-ENV=production ./target/release/vulnera-rust
-```
-
-### Docker Deployment
-
-```bash
-# Build and run with Docker
-docker build -t vulnera-rust .
-docker run -d -p 3000:3000 --name vulnera vulnera-rust
-
-# Or use docker-compose for full stack
-docker-compose up -d
-```
-
-### Kubernetes Deployment
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: vulnera-rust
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: vulnera-rust
-  template:
-    metadata:
-      labels:
-        app: vulnera-rust
-    spec:
-      containers:
-      - name: vulnera-rust
-        image: vulnera-rust:latest
-        ports:
-        - containerPort: 3000
-        env:
-        - name: VULNERA__SERVER__HOST
-          value: "0.0.0.0"
-        - name: VULNERA__SERVER__PORT
-          value: "3000"
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Build Errors**: Ensure you have the latest Rust toolchain and system dependencies
-2. **Network Errors**: Check internet connectivity and firewall settings
-3. **API Rate Limits**: Configure API keys for higher rate limits
-4. **Memory Issues**: Increase available memory for large dependency files
-5. **Cache Issues**: Clear cache directory or adjust TTL settings
-
-### Debugging
-
-```bash
-# Enable debug logging
-VULNERA__LOGGING__LEVEL=debug cargo run
-
-# Check health endpoints
-curl http://localhost:3000/health/detailed
-
-# View application logs
-docker logs vulnera-rust
-```
-
-### Getting Help
-
-- **Issues**: Report bugs on GitHub Issues
-- **Discussions**: Join GitHub Discussions for questions
-- **Documentation**: Check the `/docs` endpoint when running
-- **API Reference**: Available at `/docs` when server is running
-
-## Changelog
-
-### v3.0.0 (Current - Rust Rewrite)
-
-- **🚀 Complete Rewrite**: Migrated from Python to Rust for superior performance
-- **🌐 Multi-Ecosystem Support**: Added support for npm, Maven, Cargo, Go, PHP, Ruby, .NET
-- **🏗️ Domain-Driven Design**: Clean architecture with proper separation of concerns
-- **📊 Multiple Data Sources**: Integration with OSV, NVD, and GitHub Security Advisories
-- **🔧 RESTful API**: Complete HTTP API with OpenAPI documentation
-- **⚡ Async Architecture**: Full async/await implementation using Tokio
-- **💾 Enhanced Caching**: Configurable filesystem-based caching with TTL
-- **🐳 Container Support**: Docker and Kubernetes deployment ready
-- **🔒 Security Hardening**: Built-in rate limiting, input validation, and secure defaults
-- **📖 Auto-Documentation**: Swagger UI integration for API exploration
-- **🛠️ Developer Experience**: Comprehensive tooling, linting, and CI/CD pipelines
-
-### v2.0.0 (Python - Legacy)
-
-- **Breaking**: Migrated to async/await architecture using `aiohttp`
-- **Added**: Concurrent package analysis for improved performance
-- **Added**: Smart caching system with 24-hour expiry
-- **Added**: Enhanced HTML reports with responsive design
-- **Improved**: Rate limiting and error handling
-
-### v1.0.0 (Python - Legacy)
-
-- Initial Python implementation
-- Support for requirements.txt parsing
-- OSV API integration
-- Basic text and HTML report generation
-
-## License
-
-MIT License - See LICENSE file for details
-
-## Security Considerations
-
-- **API Communication**: All external API calls use HTTPS with certificate validation
-- **Data Privacy**: Only package names and versions are transmitted (no sensitive code)
-- **API Key Security**: Store API keys securely using environment variables or secret management
-- **Input Validation**: All user inputs are validated and sanitized
-- **Rate Limiting**: Built-in protection against API abuse and rate limiting
-- **Container Security**: Runs as non-root user in Docker containers
-- **Network Security**: Consider running behind a reverse proxy in production
-- **Cache Security**: Cache files contain only public vulnerability data
-- **Audit Trail**: Comprehensive logging for security monitoring
-
-## Roadmap
-
-- [ ] **Machine Learning**: AI-powered vulnerability risk assessment
-- [ ] **Integration APIs**: Webhooks and CI/CD pipeline integrations
-- [ ] **Advanced Caching**: Redis and distributed caching support
-- [ ] **Metrics & Monitoring**: Prometheus metrics and health monitoring
-- [ ] **Authentication**: API key management and user authentication
-- [ ] **Batch Processing**: Bulk analysis capabilities for large repositories
-- [ ] **Custom Rules**: User-defined vulnerability filtering and scoring
-- [ ] **Reporting Engine**: Advanced report templates and formats
-- [ ] **Plugin System**: Extensible architecture for custom integrations
-
-## Team
+**Core Flow:**
+Dependency file → Parser → AggregatingVulnerabilityRepository (parallel API calls, merge results) → AnalysisReport → Optional reporting/caching.
+
+**Caching:**
+Filesystem-based, SHA256 keys, TTL configurable. Always use provided cache key helpers.
+
+**Error Handling:**
+Early mapping to domain/application errors, graceful degradation, and clear API responses.
+
+---
+
+## 🧑‍💻 Development & Contribution
+
+- **Dev Setup:**
+  ```bash
+  make -C scripts/build_workflow install-deps
+  pre-commit install
+  make dev
+  ```
+- **Testing:**
+  `make test` (unit/integration), `make ci-check` (lint, format, audit)
+- **Contribution:**
+  Fork, branch, code, test, document, PR. Follow DDD, Rust best practices, and update OpenAPI docs for API changes.
+
+---
+
+## 🚢 Deployment
+
+- **Docker:**
+  ```bash
+  docker build -t vulnera-rust .
+  docker run -p 3000:3000 vulnera-rust
+  ```
+- **Kubernetes:**
+  See example deployment YAML in this repo.
+- **Production:**
+  Harden config, disable docs, restrict CORS, provide API keys.
+
+---
+
+## 🛡️ Security Considerations
+
+- HTTPS for all external API calls
+- Input validation and sanitization
+- Rate limiting and abuse protection
+- Runs as non-root in containers
+- Secure API key management
+
+---
+
+## 🐞 Troubleshooting
+
+- **Build errors:** Update Rust, install system dependencies
+- **API rate limits:** Provide API keys for OSV/NVD/GHSA
+- **Cache issues:** Clear `.vulnera_cache` or adjust TTL
+- **Debugging:**
+  ```bash
+  VULNERA__LOGGING__LEVEL=debug cargo run
+  ```
+
+---
+
+## 📜 Changelog & Roadmap
+
+- **v3.0.0:** Rust rewrite, multi-ecosystem, async, aggregation, caching, OpenAPI, Docker/K8s
+- **Planned:** ML-powered risk scoring, webhook integrations, Redis cache, advanced reporting, plugin system, **VSCode extension** for in-editor vulnerability analysis
+
+---
+
+## 🦀 Why Rust? (vs Python)
+
+Vulnera was rewritten from Python to Rust for several reasons:
+
+- **Performance:** Rust is compiled and memory-safe, enabling much faster analysis and lower latency than Python’s interpreter.
+- **Concurrency:** Tokio async runtime allows true parallelism and efficient IO, while Python’s async is limited by the GIL.
+- **Reliability:** Rust’s strict type system and error handling prevent many runtime bugs common in Python.
+- **Security:** Rust eliminates entire classes of memory safety vulnerabilities (buffer overflows, use-after-free) that can affect Python extensions.
+- **Scalability:** Rust’s async and concurrency model scales to thousands of requests with minimal resources.
+- **Ecosystem:** Rust’s package ecosystem (crates.io) and tooling (cargo, clippy, rustfmt) support modern development practices.
+
+**Legacy Python:**
+The original Vulnera was written in Python for rapid prototyping, but hit limits in performance, reliability, and maintainability. The Rust rewrite delivers a robust, production-grade backend for cloud-native deployments.
+
+---
+
+## 👥 Team
 
 - Khaled Mahmoud — Project Manager, Main Developer, Rust Backend Developer
 - Amr Medhat — Cloud Engineer
 - Youssef Mohammed — Database Engineer
 - Gasser Mohammed — Frontend Developer
 - Abd El-Rahman Mossad — Frontend Developer
+
+---
+
+## 📚 AWS Cloud Architecture
+
+![Architecture Diagram](./AWS2.png)
+
+**Summary:**
+Vulnera is designed for cloud-native, serverless deployment on AWS.
+
+- **Edge:** CloudFront for CDN, WAF for security
+- **Frontend:** Amplify for SPA hosting
+- **API:** API Gateway for routing, throttling, and security
+- **Compute:** Lambda (containerized via ECR) for backend
+- **Observability:** CloudWatch for logs and metrics
+- **CI/CD:** GitHub Actions → Amplify/ECR/Lambda
+
+This architecture enables scalable, resilient, and secure deployments with minimal operational overhead.
+
+---
+
+## 📝 License
+
+MIT License – see LICENSE file.
+
+---
+
+## 🌐 Vulnera Frontend
+
+Looking for the web UI?
+Find the official Vulnera Frontend at: [https://github.com/k5602/Vulnera-Frontend](https://github.com/k5602/Vulnera-Frontend)
