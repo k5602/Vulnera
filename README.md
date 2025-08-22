@@ -1,5 +1,9 @@
 # Vulnera Rust – High-Performance Vulnerability Analysis API
 
+[![CI](https://github.com/k5602/Vulnera/actions/workflows/main-azure-web.yml/badge.svg?branch=main)](https://github.com/k5602/Vulnera/actions/workflows/main-azure-web.yml)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+[![MSRV](https://img.shields.io/badge/MSRV-1.82%2B-orange.svg)](https://www.rust-lang.org/tools/install)
+
 Vulnera is a fast, scalable, multi-ecosystem vulnerability analysis toolkit and testing platform built in Rust. While it excels at analyzing dependency manifests, Vulnera is intended as a comprehensive vulnerability analysis and testing toolkit—supporting not only dependency scanning, but also future features like codebase auditing, security testing, and integration with CI/CD workflows. It aggregates results from OSV, NVD, and GHSA, and exposes a robust HTTP API with OpenAPI docs. Designed for cloud-native workflows, Vulnera leverages async Rust, domain-driven design, and smart caching for reliability and speed.
 
 ---
@@ -27,18 +31,17 @@ Vulnera is a fast, scalable, multi-ecosystem vulnerability analysis toolkit and 
 ```bash
 git clone https://github.com/vulnera/vulnera.git
 cd vulnera
-curl --proto '=https' --tlsv
-```
 
-1.2 -sSf https://sh.rustup.rs | sh
-```bash
-
+# Install Rust (stable) if needed
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source ~/.cargo/env
-sudo apt-get install pkg-config libssl-dev # Ubuntu/Debian
+
+# System deps (Ubuntu/Debian)
+sudo apt-get install -y pkg-config libssl-dev
+
 cargo build --release
 cargo run
-
-````
+```
 
 #### Using Docker
 
@@ -130,6 +133,22 @@ Early mapping to domain/application errors, graceful degradation, and clear API 
 - **Contribution:**
   Fork, branch, code, test, document, PR. Follow DDD, Rust best practices, and update OpenAPI docs for API changes.
 
+### Testing guidance
+
+- Run all checks locally:
+  - `make -C scripts/build_workflow ci-check`
+  - or `cargo test`
+- Run only parser tests (substring filter):
+  - `cargo test parsers`
+- Mock HTTP clients:
+  - Use the `mockito` crate. Start a mock server, stub endpoints, point the client base URL to the mock, assert responses.
+
+See tests under `src/infrastructure/parsers/` and `tests/` for patterns.
+
+### Contribution docs
+
+Please read `CONTRIBUTING.md` and `CODE_OF_CONDUCT.md` before opening PRs. We welcome issues and feature requests—use the provided templates.
+
 ---
 
 ## 🚢 Deployment
@@ -140,8 +159,7 @@ Early mapping to domain/application errors, graceful degradation, and clear API 
   docker build -t vulnera-rust .
   docker run -p 3000:3000 vulnera-rust
   ```
-- **Kubernetes:**
-  See example deployment YAML in this repo.
+- (Kubernetes manifests are intentionally not included in this repo yet.)
 - **Production:**
   Harden config, disable docs, restrict CORS, provide API keys.
 
@@ -163,16 +181,17 @@ Early mapping to domain/application errors, graceful degradation, and clear API 
 - **API rate limits:** Provide API keys for OSV/NVD/GHSA
 - **Cache issues:** Clear `.vulnera_cache` or adjust TTL
 - **Debugging:**
+
   ```bash
   VULNERA__LOGGING__LEVEL=debug cargo run
   ```
 
 ---
 
-## 📜 Changelog & Roadmap
+## 📜 Changelog
 
-- **v3.0.0:** Rust rewrite, multi-ecosystem, async, aggregation, caching, OpenAPI, Docker/K8s
-- **Planned:** ML-powered risk scoring, webhook integrations, Redis cache, advanced reporting, plugin system, **VSCode extension** for in-editor vulnerability analysis
+- v3.0.0: Rust rewrite, multi-ecosystem, async, aggregation, caching, OpenAPI, Docker
+- Planned items are tracked in “Roadmap: Next Features” at the end of this file.
 
 ---
 
@@ -224,7 +243,7 @@ This architecture provides global reach, strong identity and secret management, 
 
 ## 📝 License
 
-MIT License – see LICENSE file.
+Affero GPL v3.0 or later — see [LICENSE](./LICENSE).
 
 ---
 
@@ -275,3 +294,19 @@ This section outlines concrete, near-term work we plan to deliver across the too
 - Multi-tenant org/projects model and usage quotas
 
 If you want a dedicated tracking issue and milestone plan, open an issue and we’ll convert this roadmap into tasks with timelines.
+
+---
+
+## 🔐 Security Policy
+
+- Responsible disclosure: Please use GitHub Security Advisories (Report a vulnerability) for private coordination. Avoid public issues for security reports.
+- Secret management: On Azure, prefer Entra Managed Identities and Key Vault; avoid committing secrets or storing long‑lived tokens in plaintext env vars.
+- Target response time: within 72 hours.
+
+---
+
+## 🔁 Versioning & Releases
+
+- Semantic Versioning (SemVer): MAJOR.MINOR.PATCH.
+- Release notes and changelogs are published in GitHub Releases for this repo.
+- Every release is tagged; breaking changes are highlighted in notes.
