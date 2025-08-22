@@ -195,10 +195,10 @@ The original Vulnera was written in Python for rapid prototyping, but hit limits
 ## 👥 Team
 
 - Khaled Mahmoud — Project Manager, Main Developer, Rust Backend Developer
+- Abd El-Rahman Mossad — Frontend Developer - Extension , LSP Server Developer and Maintainer
 - Amr Medhat — Cloud Engineer
 - Youssef Mohammed — Database Engineer
 - Gasser Mohammed — Frontend Developer
-- Abd El-Rahman Mossad — Frontend Developer
 
 ---
 
