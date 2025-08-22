@@ -202,21 +202,23 @@ The original Vulnera was written in Python for rapid prototyping, but hit limits
 
 ---
 
-## 📚 AWS Cloud Architecture
+## 🌐 Azure Cloud Architecture
 
-![Architecture Diagram](./AWS2.png)
+![Azure Architecture](./docs/Azure_Arch.png)
 
 **Summary:**
-Vulnera is designed for cloud-native, serverless deployment on AWS.
+Vulnera is designed for cloud-native deployment on Microsoft Azure.
 
-- **Edge:** CloudFront for CDN, WAF for security
-- **Frontend:** Amplify for SPA hosting
-- **API:** API Gateway for routing, throttling, and security
-- **Compute:** Lambda (containerized via ECR) for backend
-- **Observability:** CloudWatch for logs and metrics
-- **CI/CD:** GitHub Actions → Amplify/ECR/Lambda
+- Edge: Azure Front Door for global entry, TLS, and WAF
+- Identity: Entra Managed Identities for workload identity (no secrets in code)
+- API Gateway: Azure API Management for routing, throttling, policies, and versioning
+- Compute: Azure App Service or Azure Container Apps for running the Rust API
+- Images: Azure Container Registry (ACR) for container images
+- Secrets: Azure Key Vault for API keys and configuration
+- Observability: Application Insights + Azure Monitor dashboards and logs
+- CI/CD: GitHub Actions builds the app and container, pushes to ACR, and deploys to App Service/Container Apps; APIM can be updated as part of the pipeline
 
-This architecture enables scalable, resilient, and secure deployments with minimal operational overhead.
+This architecture provides global reach, strong identity and secret management, and first-class observability while keeping operations streamlined.
 
 ---
 
