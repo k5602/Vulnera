@@ -192,16 +192,6 @@ The original Vulnera was written in Python for rapid prototyping, but hit limits
 
 ---
 
-## 👥 Team
-
-- Khaled Mahmoud — Project Manager, Main Developer, Rust Backend Developer
-- Abd El-Rahman Mossad — Frontend Developer - Extension , LSP Server Developer and Maintainer
-- Amr Medhat — Cloud Engineer
-- Youssef Mohammed — Database Engineer
-- Gasser Mohammed — Frontend Developer
-
----
-
 ## 🌐 Azure Cloud Architecture
 
 ![Azure Architecture](./docs/Azure_Arch.png)
@@ -222,6 +212,16 @@ This architecture provides global reach, strong identity and secret management, 
 
 ---
 
+## 👥 Team
+
+- Khaled Mahmoud — Project Manager, Main Developer, Rust Backend Developer
+- Abd El-Rahman Mossad — Frontend Developer - Extension , LSP Server Developer and Maintainer
+- Amr Medhat — Cloud Engineer
+- Youssef Mohammed — Database Engineer
+- Gasser Mohammed — Frontend Developer
+
+---
+
 ## 📝 License
 
 MIT License – see LICENSE file.
@@ -232,3 +232,46 @@ MIT License – see LICENSE file.
 
 Looking for the web UI?
 Find the official Vulnera Frontend at: [https://github.com/k5602/Vulnera-Frontend](https://github.com/k5602/Vulnera-Frontend)
+
+---
+
+## 🗺️ Roadmap: Next Features
+
+This section outlines concrete, near-term work we plan to deliver across the toolkit, editor integrations, and platform.
+
+### Toolkit expansions
+
+- More scanners and utilities integrated under a single CLI/API:
+  - SBOM generation and ingestion (CycloneDX/SPDX), dependency graph, license compliance
+  - Container image scanning (e.g., Trivy-like capabilities) and base image advisory mapping
+  - Secrets detection, basic SAST rules, and config hardening checks
+  - IaC scanning: Terraform/Kubernetes manifests with policy violations surfaced
+  - SARIF export for CI/CD and code-host integrations
+- Repository and PR scanning: diff-aware analysis and severity gating
+- Policy-as-code: fail-the-build thresholds, rules engine, and optional OPA/Rego integration
+
+### Editor ecosystem
+
+- VS Code extension: live diagnostics, quick fixes, “Analyze file/repo” commands, status bar, and SARIF viewer wiring
+- LSP server (Rust, JSON-RPC/stdio) exposing diagnostics and code actions:
+  - Clients: Neovim (nvim-lspconfig) and Zed (extension) with zero-config defaults
+  - Features: on-save analysis, inline severities, version bump suggestions, suppress/justification workflow
+  - Protocol: initialize → didOpen/didChange → diagnostics; custom method for “vulnera/analyzeProject”
+
+### Platform and backend
+
+- Redis optional cache backend with shared TTLs and cache key parity to filesystem cache
+- Resilience: centralized backoff/retry budgets and per-provider rate limiting
+- Observability: OpenTelemetry traces/metrics, enriched Application Insights dashboards
+- Security: API keys/OAuth, RBAC roles, audit logs, and secret-less auth via Entra Managed Identities on Azure
+- Offline/air-gapped mode with mirrored OSV/NVD snapshots and scheduled refresh
+
+### Nice-to-haves (suggested)
+
+- Dependency upgrade assistant (safe version bump planner per ecosystem)
+- Risk scoring that combines CVSS, exploit signals, and package health
+- Webhooks and GitHub/GitLab apps for automated PR comments with findings
+- First-class SBOM endpoint: POST SBOM → normalized analysis → report
+- Multi-tenant org/projects model and usage quotas
+
+If you want a dedicated tracking issue and milestone plan, open an issue and we’ll convert this roadmap into tasks with timelines.
