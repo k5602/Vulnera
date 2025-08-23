@@ -10,13 +10,13 @@ pub struct OsvClient;
 
 impl Default for OsvClient {
     fn default() -> Self {
-        OsvClient::new("https://api.osv.dev".to_string())
+        OsvClient::new()
     }
 }
 
 impl OsvClient {
-    /// Create a new OSV client with the given base URL
-    pub fn new(_base_url: String) -> Self {
+    /// Create a new OSV client
+    pub fn new() -> Self {
         Self
     }
 
