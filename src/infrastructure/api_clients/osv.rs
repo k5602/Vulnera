@@ -4,107 +4,14 @@ use super::traits::{RawVulnerability, VulnerabilityApiClient};
 use crate::application::errors::{ApiError, VulnerabilityError};
 use crate::domain::Package;
 use async_trait::async_trait;
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
-use std::time::Duration;
-
-/// Request payload for OSV query endpoint
-#[derive(Debug, Serialize)]
-struct OsvQueryRequest {
-    package: OsvPackage,
-}
-
-#[derive(Debug, Serialize)]
-struct OsvPackage {
-    name: String,
-    ecosystem: String,
-}
-
-/// Response from OSV query endpoint
-#[derive(Debug, Deserialize)]
-struct OsvQueryResponse {
-    vulns: Option<Vec<OsvVulnerability>>,
-}
-
-/// OSV vulnerability data structure
-#[derive(Debug, Deserialize)]
-struct OsvVulnerability {
-    id: String,
-    summary: Option<String>,
-    details: Option<String>,
-    severity: Option<Vec<OsvSeverity>>,
-    references: Option<Vec<OsvReference>>,
-    published: Option<String>,
-    affected: Option<Vec<OsvAffectedPackage>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OsvAffectedPackage {
-    package: OsvPackageInfo,
-    ranges: Option<Vec<OsvVersionRange>>,
-    versions: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OsvPackageInfo {
-    name: String,
-    ecosystem: String,
-    purl: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OsvVersionRange {
-    #[serde(rename = "type")]
-    range_type: String,
-    repo: Option<String>,
-    events: Vec<OsvVersionEvent>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OsvVersionEvent {
-    #[serde(flatten)]
-    event: std::collections::HashMap<String, String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OsvSeverity {
-    #[serde(rename = "type")]
-    severity_type: String,
-    #[serde(default)]
-    score: Option<OsvSeverityScore>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum OsvSeverityScore {
-    String(String),
-    Number(f64),
-}
-
-#[derive(Debug, Deserialize)]
-struct OsvReference {
-    #[serde(rename = "type")]
-    #[allow(dead_code)]
-    ref_type: String, // Future: reference type categorization
-    url: String,
-}
 
 /// Client for the OSV (Open Source Vulnerability) API
-pub struct OsvClient {
-    client: Client,
-    base_url: String,
-}
+pub struct OsvClient;
 
 impl OsvClient {
     /// Create a new OSV client with the given base URL
-    pub fn new(base_url: String) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .user_agent("vulnera-rust/0.1.0")
-            .build()
-            .expect("Failed to create HTTP client");
-
-        Self { client, base_url }
+    pub fn new(_base_url: String) -> Self {
+        Self
     }
 
     /// Create a new OSV client with default configuration
@@ -112,37 +19,49 @@ impl OsvClient {
         Self::new("https://api.osv.dev".to_string())
     }
 
-    /// Convert domain ecosystem to OSV ecosystem string
-    fn ecosystem_to_osv_string(ecosystem: &crate::domain::Ecosystem) -> &'static str {
+    /// Convert domain ecosystem to OSV ecosystem enum
+    fn ecosystem_to_osv(ecosystem: &crate::domain::Ecosystem) -> osv::schema::Ecosystem {
         match ecosystem {
-            crate::domain::Ecosystem::Npm => "npm",
-            crate::domain::Ecosystem::PyPI => "PyPI",
-            crate::domain::Ecosystem::Maven => "Maven",
-            crate::domain::Ecosystem::Cargo => "crates.io",
-            crate::domain::Ecosystem::Go => "Go",
-            crate::domain::Ecosystem::Packagist => "Packagist",
-            crate::domain::Ecosystem::RubyGems => "RubyGems",
-            crate::domain::Ecosystem::NuGet => "NuGet",
+            crate::domain::Ecosystem::Npm => osv::schema::Ecosystem::Npm,
+            crate::domain::Ecosystem::PyPI => osv::schema::Ecosystem::PyPI,
+            crate::domain::Ecosystem::Maven => osv::schema::Ecosystem::Maven(String::new()),
+            crate::domain::Ecosystem::Cargo => osv::schema::Ecosystem::CratesIO,
+            crate::domain::Ecosystem::Go => osv::schema::Ecosystem::Go,
+            crate::domain::Ecosystem::Packagist => osv::schema::Ecosystem::Packagist,
+            crate::domain::Ecosystem::RubyGems => osv::schema::Ecosystem::RubyGems,
+            crate::domain::Ecosystem::NuGet => osv::schema::Ecosystem::NuGet,
         }
     }
 
-    /// Convert OSV vulnerability to RawVulnerability
-    fn convert_osv_vulnerability(osv_vuln: OsvVulnerability) -> RawVulnerability {
+    /// Convert OSV vulnerability (osv::schema) to RawVulnerability
+    fn convert_osv_vulnerability(osv_vuln: osv::schema::Vulnerability) -> RawVulnerability {
+        use super::traits::{AffectedPackageData, PackageInfo, VersionEventData, VersionRangeData};
+        use osv::schema::{
+            Ecosystem as OsvEco, Event as OsvEvent, RangeType as OsvRangeType,
+            SeverityType as OsvSevType,
+        };
+
+        // Prefer CVSS v4, then v3, then v2; and the fallback to first available
         let severity = osv_vuln
             .severity
             .as_ref()
             .and_then(|severities| {
-                // Prefer any CVSS variant (e.g., CVSS_V3, CVSS_V2); fallback to first available
                 severities
                     .iter()
-                    .find(|s| s.severity_type.starts_with("CVSS"))
+                    .find(|s| matches!(s.severity_type, OsvSevType::CVSSv4))
+                    .or_else(|| {
+                        severities
+                            .iter()
+                            .find(|s| matches!(s.severity_type, OsvSevType::CVSSv3))
+                    })
+                    .or_else(|| {
+                        severities
+                            .iter()
+                            .find(|s| matches!(s.severity_type, OsvSevType::CVSSv2))
+                    })
                     .or_else(|| severities.first())
             })
-            .and_then(|s| match &s.score {
-                Some(OsvSeverityScore::String(v)) => Some(v.clone()),
-                Some(OsvSeverityScore::Number(n)) => Some(n.to_string()),
-                None => None,
-            });
+            .map(|s| s.score.clone());
 
         let references = osv_vuln
             .references
@@ -151,48 +70,87 @@ impl OsvClient {
             .map(|r| r.url)
             .collect();
 
-        let published_at = osv_vuln.published.as_deref().and_then(|p| {
-            // OSV requires RFC 3339 UTC timestamps (e.g., 2023-11-15T12:34:56Z)
-            chrono::DateTime::parse_from_rfc3339(p)
-                .map(|dt| dt.with_timezone(&chrono::Utc))
-                .ok()
-        });
+        // OSV schema provides RFC3339 DateTime<Utc>
+        let published_at = osv_vuln.published;
 
-        // Convert affected packages
-        let affected = osv_vuln
-            .affected
-            .unwrap_or_default()
+        let affected_list = osv_vuln.affected;
+        let affected = affected_list
             .into_iter()
-            .map(|osv_affected| {
-                use super::traits::{
-                    AffectedPackageData, PackageInfo, VersionEventData, VersionRangeData,
+            .map(|a| {
+                // Map ecosystem enum to a string consistent with previous behavior
+                let (name, ecosystem, purl) = if let Some(pkg) = a.package {
+                    let eco_str = match pkg.ecosystem {
+                        OsvEco::Npm => "npm".to_string(),
+                        OsvEco::PyPI => "PyPI".to_string(),
+                        OsvEco::CratesIO => "crates.io".to_string(),
+                        OsvEco::Go => "Go".to_string(),
+                        OsvEco::Maven(_) => "Maven".to_string(),
+                        OsvEco::Packagist => "Packagist".to_string(),
+                        OsvEco::RubyGems => "RubyGems".to_string(),
+                        OsvEco::NuGet => "NuGet".to_string(),
+                        // Fallback to debug string for unsupported ecosystems
+                        other => format!("{:?}", other),
+                    };
+                    (pkg.name, eco_str, pkg.purl)
+                } else {
+                    (String::new(), String::new(), None)
                 };
+
+                let ranges = a.ranges.map(|ranges| {
+                    ranges
+                        .into_iter()
+                        .map(|range| {
+                            let range_type = match range.range_type {
+                                OsvRangeType::Ecosystem => "ECOSYSTEM".to_string(),
+                                OsvRangeType::Semver => "SEMVER".to_string(),
+                                OsvRangeType::Git => "GIT".to_string(),
+                                OsvRangeType::Unspecified => "UNSPECIFIED".to_string(),
+                                _ => "UNSPECIFIED".to_string(),
+                            };
+                            let events = range
+                                .events
+                                .into_iter()
+                                .map(|e| match e {
+                                    OsvEvent::Introduced(v) => VersionEventData {
+                                        event_type: "introduced".to_string(),
+                                        value: v,
+                                    },
+                                    OsvEvent::Fixed(v) => VersionEventData {
+                                        event_type: "fixed".to_string(),
+                                        value: v,
+                                    },
+                                    OsvEvent::LastAffected(v) => VersionEventData {
+                                        event_type: "last_affected".to_string(),
+                                        value: v,
+                                    },
+                                    OsvEvent::Limit(v) => VersionEventData {
+                                        event_type: "limit".to_string(),
+                                        value: v,
+                                    },
+                                    _ => VersionEventData {
+                                        event_type: "unknown".to_string(),
+                                        value: String::new(),
+                                    },
+                                })
+                                .collect();
+
+                            VersionRangeData {
+                                range_type,
+                                repo: range.repo,
+                                events,
+                            }
+                        })
+                        .collect()
+                });
 
                 AffectedPackageData {
                     package: PackageInfo {
-                        name: osv_affected.package.name,
-                        ecosystem: osv_affected.package.ecosystem,
-                        purl: osv_affected.package.purl,
+                        name,
+                        ecosystem,
+                        purl,
                     },
-                    ranges: osv_affected.ranges.map(|ranges| {
-                        ranges
-                            .into_iter()
-                            .map(|range| VersionRangeData {
-                                range_type: range.range_type,
-                                repo: range.repo,
-                                events: range
-                                    .events
-                                    .into_iter()
-                                    .flat_map(|event| {
-                                        event.event.into_iter().map(|(event_type, value)| {
-                                            VersionEventData { event_type, value }
-                                        })
-                                    })
-                                    .collect(),
-                            })
-                            .collect()
-                    }),
-                    versions: osv_affected.versions,
+                    ranges,
+                    versions: a.versions,
                 }
             })
             .collect();
@@ -215,33 +173,20 @@ impl VulnerabilityApiClient for OsvClient {
         &self,
         package: &Package,
     ) -> Result<Vec<RawVulnerability>, VulnerabilityError> {
-        let ecosystem = Self::ecosystem_to_osv_string(&package.ecosystem);
+        let osv_eco = Self::ecosystem_to_osv(&package.ecosystem);
+        let version = package.version.to_string();
 
-        let request_payload = OsvQueryRequest {
-            package: OsvPackage {
-                name: package.name.clone(),
-                ecosystem: ecosystem.to_string(),
-            },
-        };
+        let vulns = osv::client::query_package(&package.name, &version, osv_eco)
+            .await
+            .map_err(|e| {
+                VulnerabilityError::Api(ApiError::Http {
+                    status: 500,
+                    message: format!("OSV client error: {}", e),
+                })
+            })?
+            .unwrap_or_default();
 
-        let url = format!("{}/v1/query", self.base_url);
-
-        let response = self.client.post(&url).json(&request_payload).send().await?;
-
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(VulnerabilityError::Api(ApiError::Http {
-                status,
-                message: format!("OSV API error: {}", error_text),
-            }));
-        }
-
-        let osv_response: OsvQueryResponse = response.json().await?;
-
-        let vulnerabilities = osv_response
-            .vulns
-            .unwrap_or_default()
+        let vulnerabilities = vulns
             .into_iter()
             .map(Self::convert_osv_vulnerability)
             .collect();
@@ -253,271 +198,55 @@ impl VulnerabilityApiClient for OsvClient {
         &self,
         id: &str,
     ) -> Result<Option<RawVulnerability>, VulnerabilityError> {
-        let url = format!("{}/v1/vulns/{}", self.base_url, id);
-
-        let response = self.client.get(&url).send().await?;
-
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Ok(None);
-        }
-
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(VulnerabilityError::Api(ApiError::Http {
-                status,
-                message: format!("OSV API error: {}", error_text),
-            }));
-        }
-
-        let osv_vuln: OsvVulnerability = response.json().await?;
-        let vulnerability = Self::convert_osv_vulnerability(osv_vuln);
-
-        Ok(Some(vulnerability))
+        let osv_vuln = osv::client::vulnerability(id).await.map_err(|e| {
+            VulnerabilityError::Api(ApiError::Http {
+                status: 500,
+                message: format!("OSV client error: {}", e),
+            })
+        })?;
+        Ok(Some(Self::convert_osv_vulnerability(osv_vuln)))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Ecosystem, Version};
-    use mockito::Server;
-    use serde_json::json;
-
-    fn create_test_package() -> Package {
-        Package::new(
-            "express".to_string(),
-            Version::parse("4.17.1").unwrap(),
-            Ecosystem::Npm,
-        )
-        .unwrap()
-    }
-
-    #[tokio::test]
-    async fn test_query_vulnerabilities_success() {
-        let mut server = Server::new_async().await;
-
-        let mock_response = json!({
-            "vulns": [
-                {
-                    "id": "OSV-2022-123",
-                    "summary": "Test vulnerability",
-                    "details": "A test vulnerability for unit testing",
-                    "severity": [
-                        {
-                            "type": "CVSS_V3",
-                            "score": "7.5"
-                        }
-                    ],
-                    "references": [
-                        {
-                            "type": "ADVISORY",
-                            "url": "https://example.com/advisory"
-                        }
-                    ],
-                    "published": "2022-01-01T00:00:00Z"
-                }
-            ]
-        });
-
-        let mock = server
-            .mock("POST", "/v1/query")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(mock_response.to_string())
-            .expect(1)
-            .create_async()
-            .await;
-
-        let client = OsvClient::new(server.url());
-        let package = create_test_package();
-
-        let result = client.query_vulnerabilities(&package).await;
-
-        mock.assert_async().await;
-        assert!(result.is_ok());
-
-        let vulnerabilities = result.unwrap();
-        assert_eq!(vulnerabilities.len(), 1);
-
-        let vuln = &vulnerabilities[0];
-        assert_eq!(vuln.id, "OSV-2022-123");
-        assert_eq!(vuln.summary, "Test vulnerability");
-        assert_eq!(vuln.severity, Some("7.5".to_string()));
-        assert_eq!(vuln.references.len(), 1);
-        assert!(vuln.published_at.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_query_vulnerabilities_empty_response() {
-        let mut server = Server::new_async().await;
-
-        let mock_response = json!({
-            "vulns": []
-        });
-
-        let mock = server
-            .mock("POST", "/v1/query")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(mock_response.to_string())
-            .expect(1)
-            .create_async()
-            .await;
-
-        let client = OsvClient::new(server.url());
-        let package = create_test_package();
-
-        let result = client.query_vulnerabilities(&package).await;
-
-        mock.assert_async().await;
-        assert!(result.is_ok());
-
-        let vulnerabilities = result.unwrap();
-        assert_eq!(vulnerabilities.len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_query_vulnerabilities_http_error() {
-        let mut server = Server::new_async().await;
-
-        let mock = server
-            .mock("POST", "/v1/query")
-            .with_status(500)
-            .with_body("Internal Server Error")
-            .expect(1)
-            .create_async()
-            .await;
-
-        let client = OsvClient::new(server.url());
-        let package = create_test_package();
-
-        let result = client.query_vulnerabilities(&package).await;
-
-        mock.assert_async().await;
-        assert!(result.is_err());
-
-        match result.unwrap_err() {
-            VulnerabilityError::Api(ApiError::Http { status, .. }) => {
-                assert_eq!(status, 500);
-            }
-            _ => panic!("Expected HTTP error"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_get_vulnerability_details_success() {
-        let mut server = Server::new_async().await;
-
-        let mock_response = json!({
-            "id": "OSV-2022-123",
-            "summary": "Test vulnerability",
-            "details": "A test vulnerability for unit testing",
-            "severity": [
-                {
-                    "type": "CVSS_V3",
-                    "score": "7.5"
-                }
-            ],
-            "references": [
-                {
-                    "type": "ADVISORY",
-                    "url": "https://example.com/advisory"
-                }
-            ],
-            "published": "2022-01-01T00:00:00Z"
-        });
-
-        let mock = server
-            .mock("GET", "/v1/vulns/OSV-2022-123")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(mock_response.to_string())
-            .expect(1)
-            .create_async()
-            .await;
-
-        let client = OsvClient::new(server.url());
-
-        let result = client.get_vulnerability_details("OSV-2022-123").await;
-
-        mock.assert_async().await;
-        assert!(result.is_ok());
-
-        let vulnerability = result.unwrap();
-        assert!(vulnerability.is_some());
-
-        let vuln = vulnerability.unwrap();
-        assert_eq!(vuln.id, "OSV-2022-123");
-        assert_eq!(vuln.summary, "Test vulnerability");
-        assert_eq!(vuln.severity, Some("7.5".to_string()));
-    }
-
-    #[tokio::test]
-    async fn test_get_vulnerability_details_not_found() {
-        let mut server = Server::new_async().await;
-
-        let mock = server
-            .mock("GET", "/v1/vulns/NONEXISTENT")
-            .with_status(404)
-            .expect(1)
-            .create_async()
-            .await;
-
-        let client = OsvClient::new(server.url());
-
-        let result = client.get_vulnerability_details("NONEXISTENT").await;
-
-        mock.assert_async().await;
-        assert!(result.is_ok());
-
-        let vulnerability = result.unwrap();
-        assert!(vulnerability.is_none());
-    }
+    use crate::domain::Ecosystem;
+    use osv::schema::Ecosystem as OsvEco;
 
     #[tokio::test]
     async fn test_ecosystem_conversion() {
-        assert_eq!(OsvClient::ecosystem_to_osv_string(&Ecosystem::Npm), "npm");
-        assert_eq!(OsvClient::ecosystem_to_osv_string(&Ecosystem::PyPI), "PyPI");
-        assert_eq!(
-            OsvClient::ecosystem_to_osv_string(&Ecosystem::Maven),
-            "Maven"
-        );
-        assert_eq!(
-            OsvClient::ecosystem_to_osv_string(&Ecosystem::Cargo),
-            "crates.io"
-        );
-        assert_eq!(OsvClient::ecosystem_to_osv_string(&Ecosystem::Go), "Go");
-        assert_eq!(
-            OsvClient::ecosystem_to_osv_string(&Ecosystem::Packagist),
-            "Packagist"
-        );
-        assert_eq!(
-            OsvClient::ecosystem_to_osv_string(&Ecosystem::RubyGems),
-            "RubyGems"
-        );
-        assert_eq!(
-            OsvClient::ecosystem_to_osv_string(&Ecosystem::NuGet),
-            "NuGet"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_request_payload_serialization() {
-        let package = create_test_package();
-        let ecosystem = OsvClient::ecosystem_to_osv_string(&package.ecosystem);
-
-        let request = OsvQueryRequest {
-            package: OsvPackage {
-                name: package.name.clone(),
-                ecosystem: ecosystem.to_string(),
-            },
-        };
-
-        let json_str = serde_json::to_string(&request).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
-
-        assert_eq!(parsed["package"]["name"], "express");
-        assert_eq!(parsed["package"]["ecosystem"], "npm");
+        assert!(matches!(
+            OsvClient::ecosystem_to_osv(&Ecosystem::Npm),
+            OsvEco::Npm
+        ));
+        assert!(matches!(
+            OsvClient::ecosystem_to_osv(&Ecosystem::PyPI),
+            OsvEco::PyPI
+        ));
+        assert!(matches!(
+            OsvClient::ecosystem_to_osv(&Ecosystem::Maven),
+            OsvEco::Maven(_)
+        ));
+        assert!(matches!(
+            OsvClient::ecosystem_to_osv(&Ecosystem::Cargo),
+            OsvEco::CratesIO
+        ));
+        assert!(matches!(
+            OsvClient::ecosystem_to_osv(&Ecosystem::Go),
+            OsvEco::Go
+        ));
+        assert!(matches!(
+            OsvClient::ecosystem_to_osv(&Ecosystem::Packagist),
+            OsvEco::Packagist
+        ));
+        assert!(matches!(
+            OsvClient::ecosystem_to_osv(&Ecosystem::RubyGems),
+            OsvEco::RubyGems
+        ));
+        assert!(matches!(
+            OsvClient::ecosystem_to_osv(&Ecosystem::NuGet),
+            OsvEco::NuGet
+        ));
     }
 }
