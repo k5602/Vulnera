@@ -1,4 +1,5 @@
 // Repository analysis service tests
+
 use super::{RepositoryAnalysisInput, RepositoryAnalysisService, RepositoryAnalysisServiceImpl};
 use crate::infrastructure::VulnerabilityRepository;
 use crate::infrastructure::parsers::ParserFactory;
@@ -11,7 +12,7 @@ use std::time::Duration;
 
 use crate::application::{
     AnalysisService, AnalysisServiceImpl, ApplicationError, CacheService, CacheServiceImpl,
-    ReportService, ReportServiceImpl, VulnerabilityError,
+    ReportService, ReportServiceImpl, VersionResolutionService, VulnerabilityError,
 };
 use crate::domain::{
     AffectedPackage, AnalysisReport, Ecosystem, Package, Severity, Version, VersionRange,
@@ -435,7 +436,9 @@ async fn test_analysis_service_successful_analysis() {
     );
     let vuln_repo = Arc::new(MockVulnerabilityRepository::new(vec![test_vuln]));
 
-    let analysis_service = AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service);
+    let config = crate::config::Config::default();
+    let analysis_service =
+        AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service, &config);
 
     // Test with a simple package.json
     let package_json = r#"{"dependencies": {"express": "4.17.1"}}"#;
@@ -468,7 +471,9 @@ async fn test_analysis_service_get_vulnerability_details() {
     );
     let vuln_repo = Arc::new(MockVulnerabilityRepository::new(vec![test_vuln.clone()]));
 
-    let analysis_service = AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service);
+    let config = crate::config::Config::default();
+    let analysis_service =
+        AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service, &config);
 
     let vuln_id = VulnerabilityId::new("CVE-2022-24999".to_string()).unwrap();
     let result = analysis_service.get_vulnerability_details(&vuln_id).await;
@@ -490,7 +495,9 @@ async fn test_analysis_service_vulnerability_not_found() {
     let parser_factory = Arc::new(ParserFactory::new());
     let vuln_repo = Arc::new(MockVulnerabilityRepository::new(vec![]));
 
-    let analysis_service = AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service);
+    let config = crate::config::Config::default();
+    let analysis_service =
+        AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service, &config);
 
     let vuln_id = VulnerabilityId::new("CVE-2022-99999".to_string()).unwrap();
     let result = analysis_service.get_vulnerability_details(&vuln_id).await;
@@ -516,7 +523,9 @@ async fn test_analysis_service_repository_failure() {
     let parser_factory = Arc::new(ParserFactory::new());
     let vuln_repo = Arc::new(MockVulnerabilityRepository::with_failure());
 
-    let analysis_service = AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service);
+    let config = crate::config::Config::default();
+    let analysis_service =
+        AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service, &config);
 
     let package_json = r#"{"dependencies": {"express": "4.17.1"}}"#;
     let result = analysis_service
@@ -541,7 +550,9 @@ async fn test_analysis_service_invalid_file_format() {
     let parser_factory = Arc::new(ParserFactory::new());
     let vuln_repo = Arc::new(MockVulnerabilityRepository::new(vec![]));
 
-    let analysis_service = AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service);
+    let config = crate::config::Config::default();
+    let analysis_service =
+        AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service, &config);
 
     let invalid_json = r#"{"invalid": json"#;
     let result = analysis_service
@@ -574,8 +585,9 @@ async fn test_analysis_service_caching_behavior() {
     );
     let vuln_repo = Arc::new(MockVulnerabilityRepository::new(vec![test_vuln]));
 
+    let config = crate::config::Config::default();
     let analysis_service =
-        AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service.clone());
+        AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service.clone(), &config);
 
     let package_json = r#"{"dependencies": {"express": "4.17.1"}}"#;
 
@@ -611,7 +623,7 @@ async fn test_application_error_display() {
     assert!(app_error.to_string().contains("Domain error"));
 
     let parse_error = ApplicationError::Parse(crate::application::ParseError::Json(
-        serde_json::Error::from(serde_json::from_str::<serde_json::Value>("invalid").unwrap_err()),
+        serde_json::from_str::<serde_json::Value>("invalid").unwrap_err(),
     ));
     assert!(parse_error.to_string().contains("Parsing error"));
 
@@ -665,6 +677,84 @@ async fn test_analysis_service_with_custom_concurrency() {
 }
 
 #[tokio::test]
+async fn test_concurrent_package_processing() {
+    let temp_dir = TempDir::new().unwrap();
+    let cache_repo = Arc::new(FileCacheRepository::new(
+        temp_dir.path().to_path_buf(),
+        Duration::from_secs(3600),
+    ));
+    let cache_service = Arc::new(CacheServiceImpl::new(cache_repo));
+    let parser_factory = Arc::new(ParserFactory::new());
+
+    // Create mock vulnerabilities for testing
+    let test_package = create_test_package("express", "4.17.1", Ecosystem::Npm);
+    let mock_vulns = vec![
+        create_test_vulnerability("CVE-2021-1001", Severity::High, test_package.clone()),
+        create_test_vulnerability("CVE-2021-1002", Severity::Medium, test_package),
+    ];
+    let vuln_repo = Arc::new(MockVulnerabilityRepository::new(mock_vulns));
+
+    let analysis_service = AnalysisServiceImpl::with_concurrency(
+        parser_factory,
+        vuln_repo,
+        cache_service,
+        2, // Process 2 packages concurrently
+    );
+
+    // Package.json with multiple dependencies to test concurrent processing
+    let package_json = r#"{
+        "dependencies": {
+            "express": "4.17.1",
+            "lodash": "4.17.20",
+            "axios": "0.21.1",
+            "moment": "2.29.1",
+            "react": "17.0.2"
+        }
+    }"#;
+
+    let result = analysis_service
+        .analyze_dependencies(package_json, Ecosystem::Npm)
+        .await;
+
+    assert!(result.is_ok());
+    let report = result.unwrap();
+    assert_eq!(report.metadata.total_packages, 5);
+    // Should find vulnerabilities for all packages since our mock returns them
+    assert!(report.metadata.total_vulnerabilities > 0);
+}
+
+#[tokio::test]
+async fn test_analysis_service_config_from_env() {
+    // Set environment variable for max concurrent packages
+    unsafe {
+        std::env::set_var("VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES", "5");
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let cache_repo = Arc::new(FileCacheRepository::new(
+        temp_dir.path().to_path_buf(),
+        Duration::from_secs(3600),
+    ));
+    let cache_service = Arc::new(CacheServiceImpl::new(cache_repo));
+    let parser_factory = Arc::new(ParserFactory::new());
+    let vuln_repo = Arc::new(MockVulnerabilityRepository::new(vec![]));
+
+    // Load config which should pick up the env var
+    let config = crate::config::Config::load().unwrap_or_else(|_| crate::config::Config::default());
+
+    let analysis_service =
+        AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service, &config);
+
+    // Verify the service picked up the configured value
+    assert_eq!(analysis_service.max_concurrent_requests(), 5);
+
+    // Clean up environment variable
+    unsafe {
+        std::env::remove_var("VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES");
+    }
+}
+
+#[tokio::test]
 async fn test_cache_service_cleanup() {
     let temp_dir = TempDir::new().unwrap();
     let cache_repo = Arc::new(FileCacheRepository::new(
@@ -706,7 +796,13 @@ async fn test_analyze_dependencies_use_case() {
     let cache = Arc::new(CacheServiceImpl::new(cache_repo));
     let parser_factory = Arc::new(ParserFactory::new());
 
-    let analysis_service = Arc::new(AnalysisServiceImpl::new(parser_factory, repo, cache));
+    let config = crate::config::Config::default();
+    let analysis_service = Arc::new(AnalysisServiceImpl::new(
+        parser_factory,
+        repo,
+        cache,
+        &config,
+    ));
 
     let use_case = AnalyzeDependencies::new(analysis_service);
 
@@ -735,7 +831,13 @@ async fn test_get_vulnerability_details_use_case() {
     let cache = Arc::new(CacheServiceImpl::new(cache_repo));
     let parser_factory = Arc::new(ParserFactory::new());
 
-    let analysis_service = Arc::new(AnalysisServiceImpl::new(parser_factory, repo, cache));
+    let config = crate::config::Config::default();
+    let analysis_service = Arc::new(AnalysisServiceImpl::new(
+        parser_factory,
+        repo,
+        cache,
+        &config,
+    ));
 
     let use_case = GetVulnerabilityDetails::new(analysis_service);
 
@@ -811,7 +913,13 @@ async fn test_analyze_dependencies_use_case_error_handling() {
     let cache = Arc::new(CacheServiceImpl::new(cache_repo));
     let parser_factory = Arc::new(ParserFactory::new());
 
-    let analysis_service = Arc::new(AnalysisServiceImpl::new(parser_factory, repo, cache));
+    let config = crate::config::Config::default();
+    let analysis_service = Arc::new(AnalysisServiceImpl::new(
+        parser_factory,
+        repo,
+        cache,
+        &config,
+    ));
 
     let use_case = AnalyzeDependencies::new(analysis_service);
 
@@ -820,4 +928,439 @@ async fn test_analyze_dependencies_use_case_error_handling() {
 
     // Should handle parsing errors gracefully
     assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_version_resolution_normal_path() {
+    use std::sync::Arc;
+
+    // Mock registry with versions (including a prerelease and a yanked one)
+    struct MockRegistry {
+        versions: Vec<crate::infrastructure::registries::VersionInfo>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::infrastructure::registries::PackageRegistryClient for MockRegistry {
+        async fn list_versions(
+            &self,
+            _ecosystem: crate::domain::Ecosystem,
+            _name: &str,
+        ) -> Result<
+            Vec<crate::infrastructure::registries::VersionInfo>,
+            crate::infrastructure::registries::RegistryError,
+        > {
+            Ok(self.versions.clone())
+        }
+    }
+
+    let ecosystem = crate::domain::Ecosystem::Npm;
+    let name = "demo-normal";
+    let current = crate::domain::Version::parse("1.0.0").unwrap();
+
+    // Versions: 1.0.0 (vuln), 1.1.0 (vuln), 1.2.0 (fixed), 1.3.0 (fixed), 2.0.0-alpha (fixed prerelease), 0.9.0 (yanked)
+    let versions = vec![
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("0.9.0").unwrap(),
+            true,
+            None,
+        ),
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("1.0.0").unwrap(),
+            false,
+            None,
+        ),
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("1.1.0").unwrap(),
+            false,
+            None,
+        ),
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("1.2.0").unwrap(),
+            false,
+            None,
+        ),
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("1.3.0").unwrap(),
+            false,
+            None,
+        ),
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("2.0.0-alpha.1").unwrap(),
+            false,
+            None,
+        ),
+    ];
+
+    // Vulnerability: < 1.2.0 vulnerable, fixed at 1.2.0
+    let affected_pkg = crate::domain::Package::new(
+        name.to_string(),
+        crate::domain::Version::parse("0.0.0").unwrap(),
+        ecosystem.clone(),
+    )
+    .unwrap();
+    let vuln = crate::domain::Vulnerability::new(
+        crate::domain::VulnerabilityId::new("TEST-1".to_string()).unwrap(),
+        "Test vuln normal".into(),
+        "desc".into(),
+        crate::domain::Severity::High,
+        vec![crate::domain::AffectedPackage::new(
+            affected_pkg,
+            vec![crate::domain::VersionRange::less_than(
+                crate::domain::Version::parse("1.2.0").unwrap(),
+            )],
+            vec![crate::domain::Version::parse("1.2.0").unwrap()],
+        )],
+        vec![],
+        chrono::Utc::now(),
+        vec![crate::domain::VulnerabilitySource::OSV],
+    )
+    .unwrap();
+
+    let registry = Arc::new(MockRegistry { versions });
+    let svc = crate::application::VersionResolutionServiceImpl::new(registry);
+
+    let rec = svc
+        .recommend(
+            ecosystem.clone(),
+            name,
+            Some(current.clone()),
+            std::slice::from_ref(&vuln),
+        )
+        .await
+        .expect("recommend ok");
+
+    assert_eq!(rec.nearest_safe_above_current.unwrap().to_string(), "1.2.0");
+    assert_eq!(rec.most_up_to_date_safe.unwrap().to_string(), "1.3.0");
+    assert!(
+        rec.notes.is_empty(),
+        "no notes expected in normal happy path"
+    );
+}
+
+#[tokio::test]
+async fn test_version_resolution_fallback_when_registry_unavailable() {
+    use std::sync::Arc;
+
+    // Failing registry returns an error → triggers fallback using fixed_versions
+    struct FailingRegistry;
+
+    #[async_trait::async_trait]
+    impl crate::infrastructure::registries::PackageRegistryClient for FailingRegistry {
+        async fn list_versions(
+            &self,
+            _ecosystem: crate::domain::Ecosystem,
+            _name: &str,
+        ) -> Result<
+            Vec<crate::infrastructure::registries::VersionInfo>,
+            crate::infrastructure::registries::RegistryError,
+        > {
+            Err(crate::infrastructure::registries::RegistryError::Other(
+                "unavailable".into(),
+            ))
+        }
+    }
+
+    let ecosystem = crate::domain::Ecosystem::Npm;
+    let name = "demo-fallback";
+    let current = crate::domain::Version::parse("1.0.0").unwrap();
+
+    // Vulnerability with multiple fixed versions
+    let affected_pkg = crate::domain::Package::new(
+        name.to_string(),
+        crate::domain::Version::parse("0.0.0").unwrap(),
+        ecosystem.clone(),
+    )
+    .unwrap();
+    let vuln = crate::domain::Vulnerability::new(
+        crate::domain::VulnerabilityId::new("TEST-2".to_string()).unwrap(),
+        "Test vuln fallback".into(),
+        "desc".into(),
+        crate::domain::Severity::Medium,
+        vec![crate::domain::AffectedPackage::new(
+            affected_pkg,
+            vec![crate::domain::VersionRange::less_than(
+                crate::domain::Version::parse("2.0.0").unwrap(),
+            )],
+            vec![
+                crate::domain::Version::parse("1.1.0").unwrap(),
+                crate::domain::Version::parse("1.2.0").unwrap(),
+            ],
+        )],
+        vec![],
+        chrono::Utc::now(),
+        vec![crate::domain::VulnerabilitySource::OSV],
+    )
+    .unwrap();
+
+    let registry = Arc::new(FailingRegistry);
+    let svc = crate::application::VersionResolutionServiceImpl::new(registry);
+
+    let rec = svc
+        .recommend(ecosystem.clone(), name, Some(current), &[vuln])
+        .await
+        .expect("recommend ok");
+
+    // Fallback uses minimal fixed >= current → 1.1.0
+    assert_eq!(rec.nearest_safe_above_current.unwrap().to_string(), "1.1.0");
+    assert!(
+        rec.most_up_to_date_safe.is_none(),
+        "no up-to-date safe without registry list"
+    );
+    assert!(
+        rec.notes.iter().any(|n| n.contains("registry unavailable")),
+        "should note registry unavailability"
+    );
+}
+
+#[tokio::test]
+async fn test_version_resolution_ghsa_influence() {
+    use std::sync::Arc;
+
+    // Mock registry where newest safe exists beyond GHSA first patched
+    struct MockRegistryGhsa {
+        versions: Vec<crate::infrastructure::registries::VersionInfo>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::infrastructure::registries::PackageRegistryClient for MockRegistryGhsa {
+        async fn list_versions(
+            &self,
+            _ecosystem: crate::domain::Ecosystem,
+            _name: &str,
+        ) -> Result<
+            Vec<crate::infrastructure::registries::VersionInfo>,
+            crate::infrastructure::registries::RegistryError,
+        > {
+            Ok(self.versions.clone())
+        }
+    }
+
+    let ecosystem = crate::domain::Ecosystem::Npm;
+    let name = "demo-ghsa";
+    let current = crate::domain::Version::parse("1.1.0").unwrap();
+
+    // Versions include GHSA first patched version (1.1.1) and a newer safe (1.1.2)
+    let versions = vec![
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("1.1.0").unwrap(),
+            false,
+            None,
+        ),
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("1.1.1").unwrap(),
+            false,
+            None,
+        ),
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("1.1.2").unwrap(),
+            false,
+            None,
+        ),
+    ];
+
+    // GHSA-style fixed event: firstPatchedVersion = 1.1.1
+    let affected_pkg = crate::domain::Package::new(
+        name.to_string(),
+        crate::domain::Version::parse("0.0.0").unwrap(),
+        ecosystem.clone(),
+    )
+    .unwrap();
+    let vuln_ghsa = crate::domain::Vulnerability::new(
+        crate::domain::VulnerabilityId::new("GHSA-xxxx".to_string()).unwrap(),
+        "GHSA vuln".into(),
+        "desc".into(),
+        crate::domain::Severity::High,
+        vec![crate::domain::AffectedPackage::new(
+            affected_pkg,
+            vec![crate::domain::VersionRange::less_than(
+                crate::domain::Version::parse("1.1.1").unwrap(),
+            )],
+            vec![crate::domain::Version::parse("1.1.1").unwrap()],
+        )],
+        vec![],
+        chrono::Utc::now(),
+        vec![crate::domain::VulnerabilitySource::GHSA],
+    )
+    .unwrap();
+
+    let registry = Arc::new(MockRegistryGhsa { versions });
+    let svc = crate::application::VersionResolutionServiceImpl::new(registry);
+
+    let rec = svc
+        .recommend(ecosystem, name, Some(current), &[vuln_ghsa])
+        .await
+        .expect("recommend ok");
+
+    // Nearest >= current should be GHSA's first patched version 1.1.1
+    assert_eq!(rec.nearest_safe_above_current.unwrap().to_string(), "1.1.1");
+    // Most up-to-date safe is 1.1.2
+    assert_eq!(rec.most_up_to_date_safe.unwrap().to_string(), "1.1.2");
+}
+
+#[tokio::test]
+async fn test_version_resolution_nuget_four_segment() {
+    use std::sync::Arc;
+
+    // Mock registry for NuGet that returns normalized versions.
+    // Note: In production, NuGet 4-segment versions like 4.2.11.1 are normalized by the registry client
+    // to 3-segment semver (e.g., 4.2.11). Here we simulate the normalized output.
+    struct MockNuGetRegistry {
+        versions: Vec<crate::infrastructure::registries::VersionInfo>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::infrastructure::registries::PackageRegistryClient for MockNuGetRegistry {
+        async fn list_versions(
+            &self,
+            _ecosystem: crate::domain::Ecosystem,
+            _name: &str,
+        ) -> Result<
+            Vec<crate::infrastructure::registries::VersionInfo>,
+            crate::infrastructure::registries::RegistryError,
+        > {
+            Ok(self.versions.clone())
+        }
+    }
+
+    let ecosystem = crate::domain::Ecosystem::NuGet;
+    let name = "demo-nuget";
+    let current = crate::domain::Version::parse("4.2.10").unwrap();
+
+    // Simulate normalized versions: 4.2.11 (from 4.2.11.1), 4.3.0
+    let versions = vec![
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("4.2.11").unwrap(),
+            false,
+            None,
+        ),
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("4.3.0").unwrap(),
+            false,
+            None,
+        ),
+    ];
+
+    // Vulnerability: < 4.2.11 vulnerable, fixed at 4.2.11
+    let affected_pkg = crate::domain::Package::new(
+        name.to_string(),
+        crate::domain::Version::parse("0.0.0").unwrap(),
+        ecosystem.clone(),
+    )
+    .unwrap();
+    let vuln = crate::domain::Vulnerability::new(
+        crate::domain::VulnerabilityId::new("TEST-NUGET-4SEG".to_string()).unwrap(),
+        "NuGet 4-segment normalization test".into(),
+        "desc".into(),
+        crate::domain::Severity::Medium,
+        vec![crate::domain::AffectedPackage::new(
+            affected_pkg,
+            vec![crate::domain::VersionRange::less_than(
+                crate::domain::Version::parse("4.2.11").unwrap(),
+            )],
+            vec![crate::domain::Version::parse("4.2.11").unwrap()],
+        )],
+        vec![],
+        chrono::Utc::now(),
+        vec![crate::domain::VulnerabilitySource::OSV],
+    )
+    .unwrap();
+
+    let registry = Arc::new(MockNuGetRegistry { versions });
+    let svc = crate::application::VersionResolutionServiceImpl::new(registry);
+
+    let rec = svc
+        .recommend(
+            ecosystem.clone(),
+            name,
+            Some(current.clone()),
+            std::slice::from_ref(&vuln),
+        )
+        .await
+        .expect("recommend ok");
+
+    // Nearest fix should be normalized 4.2.11; newest safe is 4.3.0
+    assert_eq!(
+        rec.nearest_safe_above_current.unwrap().to_string(),
+        "4.2.11"
+    );
+    assert_eq!(rec.most_up_to_date_safe.unwrap().to_string(), "4.3.0");
+}
+
+#[tokio::test]
+async fn test_version_resolution_pypi_prerelease_nuance() {
+    use std::sync::Arc;
+
+    // Mock registry for PyPI that returns only a prerelease.
+    struct MockPyPiRegistry {
+        versions: Vec<crate::infrastructure::registries::VersionInfo>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::infrastructure::registries::PackageRegistryClient for MockPyPiRegistry {
+        async fn list_versions(
+            &self,
+            _ecosystem: crate::domain::Ecosystem,
+            _name: &str,
+        ) -> Result<
+            Vec<crate::infrastructure::registries::VersionInfo>,
+            crate::infrastructure::registries::RegistryError,
+        > {
+            Ok(self.versions.clone())
+        }
+    }
+
+    let ecosystem = crate::domain::Ecosystem::PyPI;
+    let name = "demo-pypi";
+    let current = crate::domain::Version::parse("1.9.0").unwrap();
+
+    // Only prerelease is available as safe version (e.g., 2.0.0a1)
+    let versions = vec![crate::infrastructure::registries::VersionInfo::new(
+        crate::domain::Version::parse("2.0.0-alpha.1").unwrap(),
+        false,
+        None,
+    )];
+
+    // Vulnerability: < 2.0.0-alpha.1 vulnerable, fixed at 2.0.0-alpha.1
+    let affected_pkg = crate::domain::Package::new(
+        name.to_string(),
+        crate::domain::Version::parse("0.0.0").unwrap(),
+        ecosystem.clone(),
+    )
+    .unwrap();
+    let vuln = crate::domain::Vulnerability::new(
+        crate::domain::VulnerabilityId::new("TEST-PYPI-PR".to_string()).unwrap(),
+        "PyPI prerelease nuance".into(),
+        "desc".into(),
+        crate::domain::Severity::High,
+        vec![crate::domain::AffectedPackage::new(
+            affected_pkg,
+            vec![crate::domain::VersionRange::less_than(
+                crate::domain::Version::parse("2.0.0-alpha.1").unwrap(),
+            )],
+            vec![crate::domain::Version::parse("2.0.0-alpha.1").unwrap()],
+        )],
+        vec![],
+        chrono::Utc::now(),
+        vec![crate::domain::VulnerabilitySource::OSV],
+    )
+    .unwrap();
+
+    let registry = Arc::new(MockPyPiRegistry { versions });
+    let mut svc = crate::application::VersionResolutionServiceImpl::new(registry);
+    // Exclude prereleases via runtime setter to avoid global env impact
+    svc.set_exclude_prereleases(true);
+
+    let rec = svc
+        .recommend(ecosystem, name, Some(current), &[vuln])
+        .await
+        .expect("recommend ok");
+
+    // With prereleases excluded, no safe versions should be recommended
+    assert!(rec.nearest_safe_above_current.is_none());
+    assert!(rec.most_up_to_date_safe.is_none());
+    assert!(rec.prerelease_exclusion_applied);
+    assert!(
+        rec.notes.iter().any(|n| n.contains("prereleases excluded"))
+            || rec.notes.iter().any(|n| n.contains("prerelease"))
+    );
 }

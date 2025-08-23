@@ -65,7 +65,7 @@ impl IntoResponse for ApplicationError {
                 if sanitize_errors {
                     "An internal error occurred"
                 } else {
-                    "An internal error occurred"
+                    "Internal server error"
                 },
             ),
         };
@@ -237,10 +237,8 @@ pub async fn ghsa_token_middleware(request: Request<axum::body::Body>, next: Nex
                         let s = s.trim();
                         if let Some(rest) = s.strip_prefix("token ") {
                             Some(rest.to_string())
-                        } else if let Some(rest) = s.strip_prefix("Bearer ") {
-                            Some(rest.to_string())
                         } else {
-                            None
+                            s.strip_prefix("Bearer ").map(|rest| rest.to_string())
                         }
                     })
             })

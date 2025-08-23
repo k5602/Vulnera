@@ -1,4 +1,316 @@
 //! Application services for orchestrating business logic
+//
+// Version Resolution Service (skeleton)
+//
+// This follows the DDD layering: the application layer defines the service that
+// orchestrates registry lookups (infrastructure) and vulnerability data (domain)
+// to compute upgrade recommendations. The concrete implementation is injected
+// via Arc and uses the PackageRegistryClient trait from the infrastructure layer.
+
+/// Concrete implementation of VersionResolutionService using a registry client.
+/// Registry client is injected (no instantiation here) to respect DI and DDD boundaries.
+pub struct VersionResolutionServiceImpl<R>
+where
+    R: crate::infrastructure::registries::PackageRegistryClient,
+{
+    registry: std::sync::Arc<R>,
+    cache_service: Option<std::sync::Arc<crate::application::CacheServiceImpl>>,
+    registry_versions_ttl: std::time::Duration,
+    /// When true, exclude prerelease versions from recommendations
+    exclude_prereleases: bool,
+}
+
+impl<R> VersionResolutionServiceImpl<R>
+where
+    R: crate::infrastructure::registries::PackageRegistryClient,
+{
+    pub fn new(registry: std::sync::Arc<R>) -> Self {
+        // TTL follows backend cache config: VULNERA__CACHE__TTL_HOURS (default 24)
+        let ttl_hours = std::env::var("VULNERA__CACHE__TTL_HOURS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(24);
+        let registry_versions_ttl = std::time::Duration::from_secs(ttl_hours * 3600);
+
+        // Prerelease exclusion follows env: VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES
+        let exclude_prereleases = std::env::var("VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES")
+            .ok()
+            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "True"))
+            .unwrap_or(false);
+
+        Self {
+            registry,
+            cache_service: None,
+            registry_versions_ttl,
+            exclude_prereleases,
+        }
+    }
+
+    pub fn new_with_cache(
+        registry: std::sync::Arc<R>,
+        cache_service: std::sync::Arc<crate::application::CacheServiceImpl>,
+    ) -> Self {
+        // TTL follows backend cache config: VULNERA__CACHE__TTL_HOURS (default 24)
+        let ttl_hours = std::env::var("VULNERA__CACHE__TTL_HOURS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(24);
+        let registry_versions_ttl = std::time::Duration::from_secs(ttl_hours * 3600);
+
+        // Prerelease exclusion follows env: VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES
+        let exclude_prereleases = std::env::var("VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES")
+            .ok()
+            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "True"))
+            .unwrap_or(false);
+
+        Self {
+            registry,
+            cache_service: Some(cache_service),
+            registry_versions_ttl,
+            exclude_prereleases,
+        }
+    }
+
+    /// Set whether to exclude prerelease versions from recommendations at runtime.
+    pub fn set_exclude_prereleases(&mut self, exclude: bool) {
+        self.exclude_prereleases = exclude;
+    }
+}
+
+#[async_trait::async_trait]
+impl<R> super::VersionResolutionService for VersionResolutionServiceImpl<R>
+where
+    R: crate::infrastructure::registries::PackageRegistryClient + 'static,
+{
+    #[tracing::instrument(skip(self, name, current, vulnerabilities))]
+    async fn recommend(
+        &self,
+        ecosystem: crate::domain::Ecosystem,
+        name: &str,
+        current: Option<crate::domain::Version>,
+        vulnerabilities: &[crate::domain::Vulnerability],
+    ) -> Result<super::VersionRecommendation, crate::application::errors::ApplicationError> {
+        // Fetch available versions from registry with optional cache
+        let versions_res = if let Some(cache) = &self.cache_service {
+            let cache_key =
+                crate::application::CacheServiceImpl::registry_versions_key(&ecosystem, name);
+            match cache
+                .get::<Vec<crate::infrastructure::registries::VersionInfo>>(&cache_key)
+                .await
+            {
+                Ok(Some(cached)) => {
+                    tracing::debug!(%name, ecosystem=?ecosystem, "registry versions cache hit");
+                    Ok(cached)
+                }
+                _ => {
+                    tracing::debug!(%name, ecosystem=?ecosystem, "registry versions cache miss; querying registry");
+                    let res =
+                        crate::infrastructure::registries::PackageRegistryClient::list_versions(
+                            &*self.registry,
+                            ecosystem.clone(),
+                            name,
+                        )
+                        .await;
+                    if let Ok(ref versions) = res {
+                        // Cache using backend-configured TTL (VULNERA__CACHE__TTL_HOURS)
+                        let ttl = self.registry_versions_ttl;
+                        if let Err(e) = cache.set(&cache_key, versions, ttl).await {
+                            tracing::warn!(error=?e, %name, ecosystem=?ecosystem, "failed to cache registry versions");
+                        }
+                    }
+                    res
+                }
+            }
+        } else {
+            crate::infrastructure::registries::PackageRegistryClient::list_versions(
+                &*self.registry,
+                ecosystem.clone(),
+                name,
+            )
+            .await
+        };
+
+        // Helper: vulnerability predicate using merged OSV + GHSA model
+        let is_vulnerable = |v: &crate::domain::Version| -> bool {
+            vulnerabilities.iter().any(|vv| {
+                vv.affected_packages.iter().any(|ap| {
+                    // Build a package for matching name/ecosystem, with candidate version
+                    if let Ok(pkg) =
+                        crate::domain::Package::new(name.to_string(), v.clone(), ecosystem.clone())
+                    {
+                        ap.package.matches(&pkg) && ap.is_vulnerable(v)
+                    } else {
+                        false
+                    }
+                })
+            })
+        };
+
+        let mut notes: Vec<String> = Vec::new();
+
+        // Registry unavailable fallback (nearest from fixed versions only)
+        if versions_res.is_err() {
+            notes.push("registry unavailable; using fixed versions from OSV/GHSA for nearest recommendation".to_string());
+
+            let nearest_safe_above_current = current.as_ref().and_then(|cur| {
+                // collect minimal fixed version >= current
+                let mut candidates: Vec<crate::domain::Version> = Vec::new();
+                for vv in vulnerabilities {
+                    for ap in &vv.affected_packages {
+                        if ap.package.name == name && ap.package.ecosystem == ecosystem {
+                            for fx in &ap.fixed_versions {
+                                if fx >= cur {
+                                    candidates.push(fx.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                candidates.sort();
+                candidates.into_iter().next()
+            });
+
+            let nearest_impact = match (&current, &nearest_safe_above_current) {
+                (Some(c), Some(n)) => Some(crate::application::compute_upgrade_impact(c, n)),
+                _ => None,
+            };
+            return Ok(super::VersionRecommendation {
+                nearest_safe_above_current,
+                most_up_to_date_safe: None,
+                next_safe_minor_within_current_major: current.as_ref().and_then(|cur| {
+                    let mut candidates: Vec<crate::domain::Version> = Vec::new();
+                    for vv in vulnerabilities {
+                        for ap in &vv.affected_packages {
+                            if ap.package.name == name && ap.package.ecosystem == ecosystem {
+                                for fx in &ap.fixed_versions {
+                                    if fx >= cur && fx.0.major == cur.0.major {
+                                        candidates.push(fx.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    candidates.sort();
+                    candidates.into_iter().next()
+                }),
+                nearest_impact,
+                most_up_to_date_impact: None,
+                prerelease_exclusion_applied: self.exclude_prereleases,
+                notes,
+            });
+        }
+
+        let mut versions = versions_res.unwrap_or_default();
+        if versions.is_empty() {
+            notes.push("registry returned no versions for this package".to_string());
+        }
+        // Filter out yanked/unlisted
+        let pre_filter_len = versions.len();
+        versions.retain(|vi| !vi.yanked);
+        if pre_filter_len > 0 && versions.is_empty() {
+            notes.push(
+                "all registry versions are yanked/unlisted; cannot recommend from registry"
+                    .to_string(),
+            );
+        }
+        // Sort ascending by version (defensive)
+        versions.sort_by(|a, b| a.version.cmp(&b.version));
+
+        // Build safe sets
+        let mut safe_all: Vec<&crate::infrastructure::registries::VersionInfo> = Vec::new();
+        let mut safe_stable: Vec<&crate::infrastructure::registries::VersionInfo> = Vec::new();
+        for vi in &versions {
+            if !is_vulnerable(&vi.version) {
+                safe_all.push(vi);
+                if !vi.is_prerelease {
+                    safe_stable.push(vi);
+                }
+            }
+        }
+
+        // most_up_to_date_safe:
+        // - if exclude_prereleases: only consider stable
+        // - otherwise prefer stable, fall back to prerelease with note
+        let most_up_to_date_safe = if self.exclude_prereleases {
+            if let Some(last) = safe_stable.last() {
+                Some(last.version.clone())
+            } else {
+                notes.push(
+                    "no known safe version (prereleases excluded by configuration)".to_string(),
+                );
+                None
+            }
+        } else if let Some(last) = safe_stable.last() {
+            Some(last.version.clone())
+        } else if let Some(last) = safe_all.last() {
+            if last.is_prerelease {
+                notes
+                    .push("only prerelease versions are safe; recommending prerelease".to_string());
+            }
+            Some(last.version.clone())
+        } else {
+            notes.push("no known safe version; all available versions are vulnerable".to_string());
+            None
+        };
+
+        // nearest_safe_above_current: min safe >= current
+        // - if exclude_prereleases: consider only stable candidates
+        // - otherwise prefer stable, then prerelease with note
+        let nearest_safe_above_current = current.as_ref().and_then(|cur| {
+            if self.exclude_prereleases {
+                let stable_candidate = safe_stable.iter().find(|vi| vi.version >= *cur);
+                return stable_candidate.map(|c| c.version.clone());
+            }
+            let stable_candidate = safe_stable.iter().find(|vi| vi.version >= *cur);
+            if let Some(c) = stable_candidate {
+                return Some(c.version.clone());
+            }
+            let any_candidate = safe_all.iter().find(|vi| vi.version >= *cur);
+            if let Some(c) = any_candidate {
+                if c.is_prerelease {
+                    notes.push("nearest safe >= current is a prerelease".to_string());
+                }
+                return Some(c.version.clone());
+            }
+            None
+        });
+
+        let nearest_impact = match (&current, &nearest_safe_above_current) {
+            (Some(c), Some(n)) => Some(crate::application::compute_upgrade_impact(c, n)),
+            _ => None,
+        };
+        let most_up_to_date_impact = match (&current, &most_up_to_date_safe) {
+            (Some(c), Some(m)) => Some(crate::application::compute_upgrade_impact(c, m)),
+            _ => None,
+        };
+        Ok(super::VersionRecommendation {
+            nearest_safe_above_current,
+            most_up_to_date_safe,
+            next_safe_minor_within_current_major: current.as_ref().and_then(|cur| {
+                if self.exclude_prereleases {
+                    safe_stable
+                        .iter()
+                        .find(|vi| vi.version >= *cur && vi.version.0.major == cur.0.major)
+                        .map(|vi| vi.version.clone())
+                } else if let Some(c) = safe_stable
+                    .iter()
+                    .find(|vi| vi.version >= *cur && vi.version.0.major == cur.0.major)
+                {
+                    Some(c.version.clone())
+                } else {
+                    safe_all
+                        .iter()
+                        .find(|vi| vi.version >= *cur && vi.version.0.major == cur.0.major)
+                        .map(|vi| vi.version.clone())
+                }
+            }),
+            nearest_impact,
+            most_up_to_date_impact,
+            prerelease_exclusion_applied: self.exclude_prereleases,
+            notes,
+        })
+    }
+}
 
 use async_trait::async_trait;
 use std::time::{Duration, Instant};
@@ -699,6 +1011,16 @@ impl CacheServiceImpl {
         format!("packages:{}:{}", ecosystem.canonical_name(), content_hash)
     }
 
+    /// Generate cache key for registry versions for a package (used by VersionResolutionService)
+    /// Example: registry_versions:npm:express
+    pub fn registry_versions_key(ecosystem: &Ecosystem, package_name: &str) -> String {
+        format!(
+            "registry_versions:{}:{}",
+            ecosystem.canonical_name(),
+            package_name
+        )
+    }
+
     /// Generate a hash for file content to use as cache key component
     pub fn content_hash(content: &str) -> String {
         use sha2::{Digest, Sha256};
@@ -1256,22 +1578,22 @@ pub struct AnalysisServiceImpl<C: CacheService> {
     parser_factory: Arc<crate::infrastructure::parsers::ParserFactory>,
     vulnerability_repository: Arc<dyn VulnerabilityRepository>,
     cache_service: Arc<C>,
-    #[allow(dead_code)]
-    max_concurrent_requests: usize, // Reserved for future concurrency control
+    max_concurrent_requests: usize, // Maximum number of packages to process concurrently
 }
 
-impl<C: CacheService> AnalysisServiceImpl<C> {
-    /// Create a new analysis service implementation
+impl<C: CacheService + 'static> AnalysisServiceImpl<C> {
+    /// Create a new analysis service implementation with configuration
     pub fn new(
         parser_factory: Arc<crate::infrastructure::parsers::ParserFactory>,
         vulnerability_repository: Arc<dyn VulnerabilityRepository>,
         cache_service: Arc<C>,
+        config: &crate::config::Config,
     ) -> Self {
         Self {
             parser_factory,
             vulnerability_repository,
             cache_service,
-            max_concurrent_requests: 10, // Default to 10 concurrent requests
+            max_concurrent_requests: config.analysis.max_concurrent_packages,
         }
     }
 
@@ -1288,6 +1610,12 @@ impl<C: CacheService> AnalysisServiceImpl<C> {
             cache_service,
             max_concurrent_requests,
         }
+    }
+
+    /// Get the current max concurrent requests setting (for testing)
+    #[cfg(test)]
+    pub fn max_concurrent_requests(&self) -> usize {
+        self.max_concurrent_requests
     }
 
     /// Parse dependency file content into packages
@@ -1339,89 +1667,101 @@ impl<C: CacheService> AnalysisServiceImpl<C> {
         })
     }
 
-    /// Generate cache key for vulnerability lookup
-    fn vulnerability_cache_key(&self, package: &Package) -> String {
-        format!(
-            "vuln:{}:{}:{}",
-            package.ecosystem.canonical_name(),
-            package.name,
-            package.version
-        )
-    }
-
-    /// Look up vulnerabilities for a single package with caching
-    async fn lookup_vulnerabilities_for_package(
-        &self,
-        package: &Package,
-    ) -> Result<Vec<Vulnerability>, ApplicationError> {
-        let cache_key = self.vulnerability_cache_key(package);
-
-        // Try to get from cache first
-        if let Some(cached_vulnerabilities) = self
-            .cache_service
-            .get::<Vec<Vulnerability>>(&cache_key)
-            .await?
-        {
-            debug!("Cache hit for package: {}", package.identifier());
-            return Ok(cached_vulnerabilities);
-        }
-
-        debug!(
-            "Cache miss for package: {}, querying repository",
-            package.identifier()
-        );
-
-        // Query the repository
-        let vulnerabilities = self
-            .vulnerability_repository
-            .find_vulnerabilities(package)
-            .await
-            .map_err(ApplicationError::Vulnerability)?;
-
-        // Cache the result for 24 hours
-        let cache_ttl = Duration::from_secs(24 * 60 * 60);
-        if let Err(e) = self
-            .cache_service
-            .set(&cache_key, &vulnerabilities, cache_ttl)
-            .await
-        {
-            warn!(
-                "Failed to cache vulnerabilities for {}: {}",
-                package.identifier(),
-                e
-            );
-        }
-
-        Ok(vulnerabilities)
-    }
-
-    /// Process packages sequentially with proper error handling
-    async fn process_packages_sequentially(
+    /// Process packages concurrently with proper error handling and bounded concurrency
+    async fn process_packages_concurrently(
         &self,
         packages: Vec<Package>,
     ) -> Result<Vec<Vulnerability>, ApplicationError> {
         let mut all_vulnerabilities = Vec::new();
         let mut processed_count = 0;
+        let mut join_set: JoinSet<Result<(String, Vec<Vulnerability>), ApplicationError>> =
+            JoinSet::new();
 
-        for package in packages {
-            match self.lookup_vulnerabilities_for_package(&package).await {
-                Ok(vulnerabilities) => {
-                    processed_count += 1;
+        info!(
+            "Processing {} packages with max_concurrent_requests: {}",
+            packages.len(),
+            self.max_concurrent_requests
+        );
+
+        // Process packages in chunks to respect concurrency limits
+        for chunk in packages.chunks(self.max_concurrent_requests) {
+            // Spawn tasks for current chunk
+            for package in chunk {
+                let package_clone = package.clone();
+                let vuln_repo = self.vulnerability_repository.clone();
+                let cache_service = self.cache_service.clone();
+
+                join_set.spawn(async move {
+                    let package_id = package_clone.identifier();
+
+                    // Inline the vulnerability lookup logic
+                    let cache_key = format!(
+                        "vuln:{}:{}:{}",
+                        package_clone.ecosystem.canonical_name(),
+                        package_clone.name,
+                        package_clone.version
+                    );
+
+                    // Check cache first
+                    if let Ok(Some(cached_vulns)) =
+                        cache_service.get::<Vec<Vulnerability>>(&cache_key).await
+                    {
+                        debug!("Cache hit for package: {}", package_id);
+                        return Ok((package_id, cached_vulns));
+                    }
+
+                    // Cache miss - query repository
                     debug!(
-                        "Found {} vulnerabilities for package: {}",
-                        vulnerabilities.len(),
-                        package.identifier()
+                        "Cache miss for package: {}, querying repository",
+                        package_id
                     );
-                    all_vulnerabilities.extend(vulnerabilities);
-                }
-                Err(e) => {
-                    error!(
-                        "Failed to lookup vulnerabilities for package {}: {}",
-                        package.identifier(),
-                        e
-                    );
-                    // Continue processing other packages instead of failing completely
-                    processed_count += 1;
+
+                    match vuln_repo.find_vulnerabilities(&package_clone).await {
+                        Ok(vulnerabilities) => {
+                            // Cache the result for future use
+                            let cache_ttl = std::time::Duration::from_secs(24 * 3600); // 24 hours
+                            if let Err(e) = cache_service
+                                .set(&cache_key, &vulnerabilities, cache_ttl)
+                                .await
+                            {
+                                warn!("Failed to cache vulnerabilities for {}: {}", package_id, e);
+                            }
+
+                            debug!(
+                                "Found {} vulnerabilities for package: {}",
+                                vulnerabilities.len(),
+                                package_id
+                            );
+                            Ok((package_id, vulnerabilities))
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to lookup vulnerabilities for package {}: {}",
+                                package_id, e
+                            );
+                            // Continue processing other packages instead of failing completely
+                            Ok((package_id, vec![]))
+                        }
+                    }
+                });
+            }
+
+            // Collect results from current chunk
+            while let Some(result) = join_set.join_next().await {
+                match result {
+                    Ok(Ok((package_id, vulnerabilities))) => {
+                        processed_count += 1;
+                        debug!("Completed processing package: {}", package_id);
+                        all_vulnerabilities.extend(vulnerabilities);
+                    }
+                    Ok(Err(e)) => {
+                        error!("Package processing error: {}", e);
+                        processed_count += 1;
+                    }
+                    Err(e) => {
+                        error!("Join error: {}", e);
+                        processed_count += 1;
+                    }
                 }
             }
         }
@@ -1437,7 +1777,7 @@ impl<C: CacheService> AnalysisServiceImpl<C> {
 }
 
 #[async_trait]
-impl<C: CacheService> AnalysisService for AnalysisServiceImpl<C> {
+impl<C: CacheService + 'static> AnalysisService for AnalysisServiceImpl<C> {
     async fn analyze_dependencies(
         &self,
         file_content: &str,
@@ -1467,8 +1807,8 @@ impl<C: CacheService> AnalysisService for AnalysisServiceImpl<C> {
 
         info!("Parsed {} packages from dependency file", packages.len());
 
-        // Look up vulnerabilities for all packages sequentially
-        let vulnerabilities = self.process_packages_sequentially(packages.clone()).await?;
+        // Look up vulnerabilities for all packages concurrently
+        let vulnerabilities = self.process_packages_concurrently(packages.clone()).await?;
 
         let analysis_duration = start_time.elapsed();
         let sources_queried = {

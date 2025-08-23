@@ -7,11 +7,13 @@ use vulnera_rust::{
     Config,
     application::{
         AnalysisServiceImpl, CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl,
+        VersionResolutionServiceImpl,
     },
     infrastructure::{
         api_clients::{ghsa::GhsaClient, nvd::NvdClient, osv::OsvClient},
         cache::file_cache::FileCacheRepository,
         parsers::ParserFactory,
+        registries::MultiplexRegistryClient,
         repositories::AggregatingVulnerabilityRepository,
         repository_source::GitHubRepositoryClient,
     },
@@ -46,17 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let parser_factory = Arc::new(ParserFactory::new());
 
     // Create API clients
-    let osv_base = {
-        let raw = config.apis.osv.base_url.clone();
-        if raw.ends_with("/v1/") {
-            raw.trim_end_matches("/v1/").to_string()
-        } else if raw.ends_with("/v1") {
-            raw.trim_end_matches("/v1").to_string()
-        } else {
-            raw
-        }
-    };
-    let osv_client = Arc::new(OsvClient::new(osv_base));
+    let osv_client = Arc::new(OsvClient);
     let nvd_client = Arc::new(NvdClient::new(
         config.apis.nvd.base_url.clone(),
         config.apis.nvd.api_key.clone(),
@@ -82,6 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         parser_factory.clone(),
         vulnerability_repository.clone(),
         cache_service.clone(),
+        &config,
     ));
     let report_service = Arc::new(ReportServiceImpl::new());
     // GitHub repository analysis components (stub wiring)
@@ -120,6 +113,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config_arc,
     ));
 
+    // Create version resolution service (with cache for registry versions)
+    let registry_client = Arc::new(MultiplexRegistryClient::new());
+    let version_resolution_service = Arc::new(VersionResolutionServiceImpl::new_with_cache(
+        registry_client,
+        cache_service.clone(),
+    ));
+
     // Create application state
     let app_state = AppState {
         analysis_service,
@@ -128,6 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         vulnerability_repository,
         popular_package_service,
         repository_analysis_service,
+        version_resolution_service,
     };
 
     // Create router
@@ -140,7 +141,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if config.server.enable_docs {
         tracing::info!("API documentation available at http://{}/docs", addr);
     } else {
-        tracing::info!("API documentation disabled (enable_docs=false)");
+        tracing::info!("API documentation disabled");
     }
 
     // Start server with graceful shutdown

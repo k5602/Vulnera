@@ -351,7 +351,7 @@ mod tests {
         // Spawn many writers trying to write different data to the same key
         for i in 0..num_writers {
             let cache_clone = cache.clone();
-            let data = TestData::new(i as u64);
+            let data = TestData::new(i);
 
             let handle = tokio::spawn(async move {
                 // Random small delay to increase chance of concurrent access

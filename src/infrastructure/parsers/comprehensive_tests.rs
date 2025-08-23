@@ -457,6 +457,11 @@ async fn test_parser_factory_comprehensive() {
     assert!(factory.create_parser("go.mod").is_some());
     assert!(factory.create_parser("composer.json").is_some());
 
+    assert!(factory.create_parser("Gemfile").is_some());
+    assert!(factory.create_parser("Gemfile.lock").is_some());
+    assert!(factory.create_parser("packages.config").is_some());
+    assert!(factory.create_parser("MyProject.csproj").is_some());
+
     // Test unsupported file types
     assert!(factory.create_parser("unknown.txt").is_none());
     assert!(factory.create_parser("README.md").is_none());

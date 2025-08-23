@@ -4,6 +4,8 @@ use super::traits::PackageFileParser;
 use crate::application::errors::ParseError;
 use crate::domain::{Ecosystem, Package, Version};
 use async_trait::async_trait;
+use quick_xml::Reader;
+use quick_xml::events::Event;
 use regex::Regex;
 
 /// Parser for Maven pom.xml files
@@ -20,54 +22,84 @@ impl MavenParser {
         Self
     }
 
-    /// Extract dependencies from XML content
+    /// Extract dependencies from XML content using quick-xml
     fn extract_maven_dependencies(&self, content: &str) -> Result<Vec<Package>, ParseError> {
         let mut packages = Vec::new();
 
-        // Simple regex-based XML parsing (for production, consider using a proper XML parser)
-        // Use DOTALL flag to match across newlines
-        let dependency_regex = Regex::new(r"(?s)<dependency>.*?</dependency>").unwrap();
-        let group_regex = Regex::new(r"<groupId>\s*(.*?)\s*</groupId>").unwrap();
-        let artifact_regex = Regex::new(r"<artifactId>\s*(.*?)\s*</artifactId>").unwrap();
-        let version_regex = Regex::new(r"<version>\s*(.*?)\s*</version>").unwrap();
+        let mut reader = Reader::from_str(content);
 
-        for dependency_match in dependency_regex.find_iter(content) {
-            let dependency_xml = dependency_match.as_str();
+        let mut buf = Vec::new();
+        let mut in_dependency = false;
+        let mut current_tag: Option<String> = None;
 
-            let group_id = group_regex
-                .captures(dependency_xml)
-                .and_then(|caps| caps.get(1))
-                .map(|m| m.as_str().trim())
-                .unwrap_or("");
+        let mut group_id: Option<String> = None;
+        let mut artifact_id: Option<String> = None;
+        let mut version_str: Option<String> = None;
 
-            let artifact_id = artifact_regex
-                .captures(dependency_xml)
-                .and_then(|caps| caps.get(1))
-                .map(|m| m.as_str().trim())
-                .unwrap_or("");
-
-            let version_str = version_regex
-                .captures(dependency_xml)
-                .and_then(|caps| caps.get(1))
-                .map(|m| m.as_str().trim())
-                .unwrap_or("0.0.0");
-
-            if !group_id.is_empty() && !artifact_id.is_empty() {
-                // Maven package name is typically groupId:artifactId
-                let package_name = format!("{}:{}", group_id, artifact_id);
-
-                // Clean version string (remove Maven-specific patterns)
-                let clean_version = self.clean_maven_version(version_str)?;
-
-                let version = Version::parse(&clean_version).map_err(|_| ParseError::Version {
-                    version: version_str.to_string(),
-                })?;
-
-                let package = Package::new(package_name, version, Ecosystem::Maven)
-                    .map_err(|e| ParseError::MissingField { field: e })?;
-
-                packages.push(package);
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) => {
+                    let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    if name == "dependency" {
+                        in_dependency = true;
+                        group_id = None;
+                        artifact_id = None;
+                        version_str = None;
+                        current_tag = None;
+                    } else if in_dependency {
+                        current_tag = Some(name);
+                    }
+                }
+                Ok(Event::End(e)) => {
+                    let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    if name == "dependency" && in_dependency {
+                        // finalize this dependency
+                        if let (Some(g), Some(a)) = (group_id.as_ref(), artifact_id.as_ref()) {
+                            let pkg_name = format!("{}:{}", g, a);
+                            // Clean version
+                            let cleaned = self
+                                .clean_maven_version(version_str.as_deref().unwrap_or("0.0.0"))?;
+                            let version =
+                                Version::parse(&cleaned).map_err(|_| ParseError::Version {
+                                    version: version_str.clone().unwrap_or_default(),
+                                })?;
+                            let package = Package::new(pkg_name, version, Ecosystem::Maven)
+                                .map_err(|e| ParseError::MissingField { field: e })?;
+                            packages.push(package);
+                        }
+                        in_dependency = false;
+                        current_tag = None;
+                    } else if in_dependency {
+                        current_tag = None;
+                    }
+                }
+                Ok(Event::Text(t)) => {
+                    if in_dependency {
+                        if let Some(tag) = current_tag.as_deref() {
+                            let txt = reader
+                                .decoder()
+                                .decode(t.as_ref())
+                                .unwrap_or_default()
+                                .trim()
+                                .to_string();
+                            match tag {
+                                "groupId" => group_id = Some(txt.trim().to_string()),
+                                "artifactId" => artifact_id = Some(txt.trim().to_string()),
+                                "version" => version_str = Some(txt.trim().to_string()),
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    return Err(ParseError::MissingField {
+                        field: format!("XML parse error: {}", e),
+                    });
+                }
+                _ => {}
             }
+            buf.clear();
         }
 
         Ok(packages)

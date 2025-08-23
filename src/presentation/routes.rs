@@ -21,7 +21,7 @@ use crate::presentation::{
             AppState, analyze_dependencies, get_analysis_report, get_vulnerability,
             list_vulnerabilities, refresh_vulnerability_cache,
         },
-        health::{detailed_health_check, health_check, liveness_probe, metrics, readiness_probe},
+        health::{health_check, metrics},
     },
     middleware::{
         ghsa_token_middleware, https_enforcement_middleware, logging_middleware,
@@ -45,9 +45,6 @@ use axum::{
         crate::presentation::controllers::analysis::refresh_vulnerability_cache,
         crate::presentation::controllers::analysis::get_analysis_report,
         crate::presentation::controllers::health::health_check,
-        crate::presentation::controllers::health::detailed_health_check,
-        crate::presentation::controllers::health::liveness_probe,
-        crate::presentation::controllers::health::readiness_probe,
         crate::presentation::controllers::health::metrics
     ),
     components(
@@ -61,7 +58,15 @@ use axum::{
             SeverityBreakdownDto,
             PaginationDto,
             ErrorResponse,
-            HealthResponse
+            HealthResponse,
+            VersionRecommendationDto,
+            RepositoryAnalysisRequest,
+            RepositoryAnalysisResponse,
+            RepositoryFileResultDto,
+            RepositoryPackageDto,
+            RepositoryAnalysisMetadataDto,
+            RepositoryConfigCapsDto,
+            RepositoryDescriptorDto
         )
     ),
     tags(
@@ -73,25 +78,19 @@ use axum::{
         title = "Vulnera API",
         version = "1.0.0",
         description = "A comprehensive vulnerability analysis API for multiple programming language ecosystems. Supports analysis of dependency files from npm, PyPI, Maven, Cargo, Go modules, and Composer ecosystems.",
-        terms_of_service = "https://vulnera.dev/terms",
-        contact(
-            name = "Vulnera Development Team",
-            email = "support@vulnera.dev",
-            url = "https://vulnera.dev/contact"
-        ),
         license(
-            name = "MIT",
-            url = "https://opensource.org/licenses/MIT"
+            name = "AGPL-3.0",
+            url = "https://www.gnu.org/licenses/agpl-3.0.html"
         )
     ),
     servers(
         (url = "http://localhost:3000", description = "Local development server"),
-        (url = "https://staging.vulnera.dev", description = "Staging environment"),
-        (url = "https://api.vulnera.dev", description = "Production server")
+
+        (url = "VULNERA__SERVER__HOST", description = "Production server")
     ),
     external_docs(
         description = "Find more information about Vulnera",
-        url = "https://vulnera.dev/docs"
+        url = "https://github.com/k5602/Vulnera"
     )
 )]
 pub struct ApiDoc;
@@ -114,12 +113,8 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
 
     let health_routes = Router::new()
         .route("/health", get(health_check))
-        .route("/health/detailed", get(detailed_health_check))
-        .route("/health/live", get(liveness_probe))
-        .route("/health/ready", get(readiness_probe))
         .route("/metrics", get(metrics));
 
-    // Create CORS layer with proper configuration
     // Build CORS layer from configuration
     let cors_layer =
         if config.server.allowed_origins.len() == 1 && config.server.allowed_origins[0] == "*" {

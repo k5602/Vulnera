@@ -35,6 +35,8 @@ pub struct AnalysisResponse {
 
     /// Comprehensive analysis metadata and statistics
     pub metadata: AnalysisMetadataDto,
+    /// Optional per-package version recommendations (scaffold)
+    pub version_recommendations: Option<Vec<VersionRecommendationDto>>,
 
     /// Pagination information for large result sets
     pub pagination: PaginationDto,
@@ -234,6 +236,48 @@ pub struct VulnerabilityListResponse {
     pub pagination: PaginationDto,
 }
 
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct VersionRecommendationDto {
+    /// Package name
+    #[schema(example = "express")]
+    pub package: String,
+
+    /// Ecosystem identifier
+    #[schema(example = "npm")]
+    pub ecosystem: String,
+
+    /// Current version found (if known)
+    #[schema(example = "4.17.1")]
+    pub current_version: Option<String>,
+
+    /// Minimal safe version greater than or equal to current (if available)
+    #[schema(example = "4.18.0")]
+    pub nearest_safe_above_current: Option<String>,
+
+    /// Newest safe version available (may equal nearest)
+    #[schema(example = "4.19.2")]
+    pub most_up_to_date_safe: Option<String>,
+
+    /// Next safe version within the current major (if available)
+    #[schema(example = "4.18.5")]
+    pub next_safe_minor_within_current_major: Option<String>,
+
+    /// Impact classification for the nearest recommendation (major/minor/patch/unknown)
+    #[schema(example = "minor")]
+    pub nearest_impact: Option<String>,
+
+    /// Impact classification for the most up-to-date recommendation (major/minor/patch/unknown)
+    #[schema(example = "major")]
+    pub most_up_to_date_impact: Option<String>,
+
+    /// Whether prereleases were excluded by configuration when computing recommendations
+    #[schema(example = false)]
+    pub prerelease_exclusion_applied: Option<bool>,
+
+    /// Notes about recommendation (e.g., prerelease chosen, registry unavailable)
+    pub notes: Option<Vec<String>>,
+}
+
 /// Request for analyzing an entire GitHub repository's dependency manifests
 #[derive(Deserialize, ToSchema)]
 pub struct RepositoryAnalysisRequest {
@@ -270,7 +314,7 @@ pub struct RepositoryAnalysisRequest {
     #[schema(example = true, default = true)]
     pub include_lockfiles: Option<bool>,
 
-    /// Include per-file package listings in response (may increase payload size)
+    /// Include per-file package listings in response
     #[schema(example = false, default = false)]
     pub return_packages: Option<bool>,
 }
@@ -343,6 +387,7 @@ pub struct RepositoryAnalysisResponse {
     pub files: Vec<RepositoryFileResultDto>,
     pub vulnerabilities: Vec<VulnerabilityDto>,
     pub metadata: RepositoryAnalysisMetadataDto,
+    pub version_recommendations: Option<Vec<VersionRecommendationDto>>,
 }
 
 /// Repository identification descriptor

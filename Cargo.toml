@@ -20,6 +20,10 @@ tokio = { version = "1.47.1", features = ["full"] }
 futures = "0.3.31"
 async-trait = "0.1.89"
 
+# Sources
+osv = { version = "0.2", features = ["client"] }
+nvd_cve = "0.2.0"
+
 # HTTP client
 reqwest = { version = "0.12.23", features = ["json", "stream"] }
 
@@ -54,7 +58,11 @@ hex = "0.4.3"
 # File and Version parsing
 toml = "0.9.5"
 serde_yaml = "0.9.34-deprecated"
+serde_yml = "0.0.12"
+quick-xml = "0.38.2"
 regex = "1.11.1"
+pest = "2.8.1"
+pest_derive = "2.8.1"
 semver = { version = "1.0", features = ["serde"] }
 octocrab = { version = "0.44" }
 base64 = "0.22"

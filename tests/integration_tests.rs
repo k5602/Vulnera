@@ -6,9 +6,7 @@ use tokio::time::timeout;
 /// Test that the server can start and respond to health checks
 #[tokio::test]
 async fn test_server_health_endpoint() {
-    // This test would require starting the actual server
-    // For now, we'll just ensure the test framework works
-    assert!(true, "Integration test framework is working");
+    // no-op: integration scaffold without constant assertion
 }
 
 /// Test vulnerability analysis endpoint with real data
@@ -17,7 +15,7 @@ async fn test_vulnerability_analysis_integration() {
     // This would test the full analysis pipeline
     // Including real API calls to vulnerability databases
     // For now, placeholder for future implementation
-    assert!(true, "Analysis integration test placeholder");
+    // no-op: analysis integration placeholder without constant assertion
 }
 
 /// Test that configuration loading works correctly
@@ -50,7 +48,4 @@ async fn test_external_dependencies() {
     } else {
         println!("OSV API is not reachable (network issue or timeout)");
     }
-
-    // Always pass since network connectivity shouldn't fail tests
-    assert!(true, "External dependency test completed");
 }

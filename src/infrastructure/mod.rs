@@ -5,6 +5,7 @@
 pub mod api_clients;
 pub mod cache;
 pub mod parsers;
+pub mod registries;
 pub mod repositories;
 pub mod repository_source;
 pub mod resilience;

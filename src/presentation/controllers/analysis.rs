@@ -14,8 +14,8 @@ use crate::presentation::models::{
     AffectedPackageDto, AnalysisMetadataDto, AnalysisRequest, AnalysisResponse, ErrorResponse,
     PaginationDto, RepositoryAnalysisMetadataDto, RepositoryAnalysisRequest,
     RepositoryAnalysisResponse, RepositoryConfigCapsDto, RepositoryDescriptorDto,
-    RepositoryFileResultDto, RepositoryPackageDto, SeverityBreakdownDto, VulnerabilityDto,
-    VulnerabilityListResponse,
+    RepositoryFileResultDto, RepositoryPackageDto, SeverityBreakdownDto, VersionRecommendationDto,
+    VulnerabilityDto, VulnerabilityListResponse,
 };
 
 /// Query parameters for pagination
@@ -121,6 +121,7 @@ pub struct AppState {
     pub vulnerability_repository: Arc<dyn crate::infrastructure::VulnerabilityRepository>,
     pub popular_package_service: Arc<dyn crate::application::PopularPackageService>,
     pub repository_analysis_service: Option<Arc<dyn crate::application::RepositoryAnalysisService>>, // optional until fully wired
+    pub version_resolution_service: Arc<dyn crate::application::VersionResolutionService>,
 }
 
 /// Analyze an entire repository (stub implementation)
@@ -282,6 +283,86 @@ pub async fn analyze_repository(
         },
     };
 
+    // Compute per-package version recommendations when package details are available
+    let mut version_recommendations: Vec<VersionRecommendationDto> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let max_queries = std::env::var("VULNERA__RECOMMENDATIONS__MAX_VERSION_QUERIES_PER_REQUEST")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(50);
+    for file in result.files.iter() {
+        for pkg in file.packages.iter() {
+            let identifier = format!(
+                "{}:{}@{}",
+                format!("{:?}", pkg.ecosystem).to_lowercase(),
+                pkg.name,
+                pkg.version
+            );
+            if !seen.insert(identifier) {
+                continue;
+            }
+            // Find vulnerabilities that affect this package
+            let affecting: Vec<crate::domain::Vulnerability> = result
+                .vulnerabilities
+                .iter()
+                .filter(|v| {
+                    v.affected_packages.iter().any(|ap| {
+                        ap.package.name == pkg.name && ap.package.ecosystem == pkg.ecosystem
+                    })
+                })
+                .cloned()
+                .collect();
+            if affecting.is_empty() {
+                continue;
+            }
+            if version_recommendations.len() < max_queries {
+                match app_state
+                    .version_resolution_service
+                    .recommend(
+                        pkg.ecosystem.clone(),
+                        &pkg.name,
+                        Some(pkg.version.clone()),
+                        &affecting,
+                    )
+                    .await
+                {
+                    Ok(rec) => {
+                        version_recommendations.push(VersionRecommendationDto {
+                            package: pkg.name.clone(),
+                            ecosystem: format!("{:?}", pkg.ecosystem).to_lowercase(),
+                            current_version: Some(pkg.version.to_string()),
+                            nearest_safe_above_current: rec
+                                .nearest_safe_above_current
+                                .map(|v| v.to_string()),
+                            most_up_to_date_safe: rec.most_up_to_date_safe.map(|v| v.to_string()),
+                            next_safe_minor_within_current_major: rec
+                                .next_safe_minor_within_current_major
+                                .map(|v| v.to_string()),
+                            nearest_impact: rec
+                                .nearest_impact
+                                .map(|i| format!("{:?}", i).to_lowercase()),
+                            most_up_to_date_impact: rec
+                                .most_up_to_date_impact
+                                .map(|i| format!("{:?}", i).to_lowercase()),
+                            prerelease_exclusion_applied: Some(rec.prerelease_exclusion_applied),
+                            notes: if rec.notes.is_empty() {
+                                None
+                            } else {
+                                Some(rec.notes)
+                            },
+                        });
+                    }
+                    Err(e) => {
+                        tracing::debug!(
+                            package = %pkg.identifier(),
+                            error = %e,
+                            "version recommendation for repository analysis failed"
+                        );
+                    }
+                }
+            }
+        }
+    }
     let response = RepositoryAnalysisResponse {
         id: result.id,
         repository: RepositoryDescriptorDto {
@@ -294,6 +375,11 @@ pub async fn analyze_repository(
         files,
         vulnerabilities,
         metadata,
+        version_recommendations: if version_recommendations.is_empty() {
+            None
+        } else {
+            Some(version_recommendations)
+        },
     };
 
     Ok(Json(response))
@@ -383,7 +469,7 @@ pub async fn analyze_dependencies(
             low: analysis_report.metadata.severity_breakdown.low,
         },
         analysis_duration_ms: analysis_report.metadata.analysis_duration.as_millis() as u64,
-        sources_queried: analysis_report.metadata.sources_queried,
+        sources_queried: analysis_report.metadata.sources_queried.clone(),
     };
 
     let pagination = PaginationDto {
@@ -395,10 +481,85 @@ pub async fn analyze_dependencies(
         has_prev: false,
     };
 
+    // Build per-package version recommendations
+    let mut version_recommendations: Vec<VersionRecommendationDto> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let max_queries = std::env::var("VULNERA__RECOMMENDATIONS__MAX_VERSION_QUERIES_PER_REQUEST")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(50);
+    for pkg in analysis_report.packages.iter() {
+        let id = pkg.identifier();
+        if !seen.insert(id) {
+            continue;
+        }
+        // Only compute recommendations for packages with detected vulnerabilities
+        let affecting: Vec<crate::domain::Vulnerability> = analysis_report
+            .vulnerabilities_for_package(pkg)
+            .into_iter()
+            .cloned()
+            .collect();
+        if affecting.is_empty() {
+            continue;
+        }
+
+        if version_recommendations.len() < max_queries {
+            match app_state
+                .version_resolution_service
+                .recommend(
+                    pkg.ecosystem.clone(),
+                    &pkg.name,
+                    Some(pkg.version.clone()),
+                    &affecting,
+                )
+                .await
+            {
+                Ok(rec) => {
+                    version_recommendations.push(VersionRecommendationDto {
+                        package: pkg.name.clone(),
+                        ecosystem: format!("{:?}", pkg.ecosystem).to_lowercase(),
+                        current_version: Some(pkg.version.to_string()),
+                        nearest_safe_above_current: rec
+                            .nearest_safe_above_current
+                            .map(|v| v.to_string()),
+                        most_up_to_date_safe: rec.most_up_to_date_safe.map(|v| v.to_string()),
+                        next_safe_minor_within_current_major: rec
+                            .next_safe_minor_within_current_major
+                            .map(|v| v.to_string()),
+                        nearest_impact: rec
+                            .nearest_impact
+                            .map(|i| format!("{:?}", i).to_lowercase()),
+                        most_up_to_date_impact: rec
+                            .most_up_to_date_impact
+                            .map(|i| format!("{:?}", i).to_lowercase()),
+                        prerelease_exclusion_applied: Some(rec.prerelease_exclusion_applied),
+                        notes: if rec.notes.is_empty() {
+                            None
+                        } else {
+                            Some(rec.notes)
+                        },
+                    });
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        package = %pkg.identifier(),
+                        error = %e,
+                        "version recommendation failed"
+                    );
+                }
+            }
+        }
+    }
+
     let response = AnalysisResponse {
         id: analysis_report.id,
         vulnerabilities,
         metadata,
+        version_recommendations: if version_recommendations.is_empty() {
+            None
+        } else {
+            Some(version_recommendations)
+        },
         pagination,
     };
 
@@ -717,6 +878,7 @@ pub async fn get_analysis_report(
             id: cached_report.id,
             vulnerabilities,
             metadata,
+            version_recommendations: None,
             pagination: pagination_dto,
         };
 

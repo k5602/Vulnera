@@ -153,7 +153,7 @@ impl PackageLockParser {
     }
 
     /// Extract packages from lockfile dependencies
-    fn extract_lockfile_packages(&self, deps: &Value) -> Result<Vec<Package>, ParseError> {
+    fn extract_lockfile_packages(deps: &Value) -> Result<Vec<Package>, ParseError> {
         let mut packages = Vec::new();
 
         if let Some(deps_obj) = deps.as_object() {
@@ -171,7 +171,7 @@ impl PackageLockParser {
 
                 // Recursively process nested dependencies
                 if let Some(nested_deps) = dep_info.get("dependencies") {
-                    packages.extend(self.extract_lockfile_packages(nested_deps)?);
+                    packages.extend(Self::extract_lockfile_packages(nested_deps)?);
                 }
             }
         }
@@ -192,12 +192,12 @@ impl PackageFileParser for PackageLockParser {
 
         // Extract from dependencies section
         if let Some(deps) = json.get("dependencies") {
-            packages.extend(self.extract_lockfile_packages(deps)?);
+            packages.extend(Self::extract_lockfile_packages(deps)?);
         }
 
         // Extract from packages section (npm v7+)
         if let Some(pkgs) = json.get("packages") {
-            packages.extend(self.extract_lockfile_packages(pkgs)?);
+            packages.extend(Self::extract_lockfile_packages(pkgs)?);
         }
 
         Ok(packages)
@@ -264,11 +264,13 @@ impl YarnLockParser {
             }
             // Version line
             else if line.starts_with("version ") {
-                let version_str = line
-                    .strip_prefix("version ")
-                    .and_then(|v| v.strip_prefix('"'))
-                    .and_then(|v| v.strip_suffix('"'))
-                    .unwrap_or(&line[8..]);
+                let version_str = if let Some(rest) = line.strip_prefix("version ") {
+                    rest.strip_prefix('"')
+                        .and_then(|v| v.strip_suffix('"'))
+                        .unwrap_or(rest)
+                } else {
+                    line
+                };
                 current_version = Some(version_str.to_string());
             }
         }

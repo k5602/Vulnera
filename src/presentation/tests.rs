@@ -1,142 +1,148 @@
-#[cfg(test)]
-mod tests {
-    use crate::{
-        application::errors::VulnerabilityError,
-        application::{
-            AnalysisServiceImpl, CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl,
-        },
-        domain::Package,
-        infrastructure::{
-            api_clients::traits::{RawVulnerability, VulnerabilityApiClient},
-            cache::file_cache::FileCacheRepository,
-            parsers::ParserFactory,
-            repositories::AggregatingVulnerabilityRepository,
-        },
-        presentation::{AppState, create_router},
-    };
-    use async_trait::async_trait;
-    use axum::http::StatusCode;
-    use std::sync::Arc;
-    use std::time::Duration;
-    use tower::ServiceExt;
+use crate::{
+    application::errors::VulnerabilityError,
+    application::{
+        AnalysisServiceImpl, CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl,
+        VersionResolutionServiceImpl,
+    },
+    domain::Package,
+    infrastructure::{
+        api_clients::traits::{RawVulnerability, VulnerabilityApiClient},
+        cache::file_cache::FileCacheRepository,
+        parsers::ParserFactory,
+        registries::MultiplexRegistryClient,
+        repositories::AggregatingVulnerabilityRepository,
+    },
+    presentation::{AppState, create_router},
+};
+use async_trait::async_trait;
+use axum::http::StatusCode;
+use std::sync::Arc;
+use std::time::Duration;
+use tower::ServiceExt;
 
-    // Mock API client for testing
-    struct MockApiClient;
+// Mock API client for testing
+struct MockApiClient;
 
-    #[async_trait]
-    impl VulnerabilityApiClient for MockApiClient {
-        async fn query_vulnerabilities(
-            &self,
-            _package: &Package,
-        ) -> Result<Vec<RawVulnerability>, VulnerabilityError> {
-            Ok(vec![])
-        }
-
-        async fn get_vulnerability_details(
-            &self,
-            _id: &str,
-        ) -> Result<Option<RawVulnerability>, VulnerabilityError> {
-            Ok(None)
-        }
+#[async_trait]
+impl VulnerabilityApiClient for MockApiClient {
+    async fn query_vulnerabilities(
+        &self,
+        _package: &Package,
+    ) -> Result<Vec<RawVulnerability>, VulnerabilityError> {
+        Ok(vec![])
     }
 
-    fn dummy_state() -> AppState {
-        let cache_repo = Arc::new(FileCacheRepository::new(
-            std::path::PathBuf::from(".vulnera_cache_test"),
-            Duration::from_secs(60),
-        ));
-        let cache_service = Arc::new(CacheServiceImpl::new(cache_repo));
-        let parser_factory = Arc::new(ParserFactory::new());
-
-        // Create mock API clients
-        let mock_client = Arc::new(MockApiClient);
-        let vuln_repo = Arc::new(AggregatingVulnerabilityRepository::new(
-            mock_client.clone(),
-            mock_client.clone(),
-            mock_client,
-        ));
-
-        let analysis_service = Arc::new(AnalysisServiceImpl::new(
-            parser_factory,
-            vuln_repo.clone(),
-            cache_service.clone(),
-        ));
-        let report_service = Arc::new(ReportServiceImpl::new());
-
-        // Create popular package service with test config
-        let config = Arc::new(crate::Config::default());
-        let popular_package_service = Arc::new(PopularPackageServiceImpl::new(
-            vuln_repo.clone(),
-            cache_service.clone(),
-            config,
-        ));
-
-        AppState {
-            analysis_service,
-            cache_service,
-            report_service,
-            vulnerability_repository: vuln_repo,
-            popular_package_service,
-            repository_analysis_service: None,
-        }
+    async fn get_vulnerability_details(
+        &self,
+        _id: &str,
+    ) -> Result<Option<RawVulnerability>, VulnerabilityError> {
+        Ok(None)
     }
+}
 
-    #[tokio::test]
-    async fn docs_disabled_returns_404() {
-        let mut config = crate::Config::default();
-        config.server.enable_docs = false;
-        let app = create_router(dummy_state(), &config);
-        let response = app
-            .oneshot(
-                axum::http::Request::builder()
-                    .uri("/docs")
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    }
+fn dummy_state() -> AppState {
+    let cache_repo = Arc::new(FileCacheRepository::new(
+        std::path::PathBuf::from(".vulnera_cache_test"),
+        Duration::from_secs(60),
+    ));
+    let cache_service = Arc::new(CacheServiceImpl::new(cache_repo));
+    let parser_factory = Arc::new(ParserFactory::new());
 
-    #[tokio::test]
-    async fn docs_enabled_returns_ok() {
-        let mut config = crate::Config::default();
-        config.server.enable_docs = true;
-        let app = create_router(dummy_state(), &config);
-        let response = app
-            .oneshot(
-                axum::http::Request::builder()
-                    .uri("/docs")
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        //note: Swagger UI may redirect (303) before serving index depending on version
-        assert!(
-            matches!(response.status(), StatusCode::OK | StatusCode::SEE_OTHER),
-            "unexpected status: {}",
-            response.status()
-        );
-    }
+    // Create mock API clients
+    let mock_client = Arc::new(MockApiClient);
+    let vuln_repo = Arc::new(AggregatingVulnerabilityRepository::new(
+        mock_client.clone(),
+        mock_client.clone(),
+        mock_client,
+    ));
 
-    #[tokio::test]
-    async fn repository_analysis_disabled_returns_error() {
-        let mut config = crate::Config::default();
-        config.server.enable_docs = false;
-        let app = create_router(dummy_state(), &config);
-        let body = serde_json::json!({"repository_url": "https://github.com/rust-lang/cargo"});
-        let response = app
-            .oneshot(
-                axum::http::Request::builder()
-                    .method("POST")
-                    .uri("/api/v1/analyze/repository")
-                    .header(axum::http::header::CONTENT_TYPE, "application/json")
-                    .body(axum::body::Body::from(body.to_string()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert!(response.status().is_server_error() || response.status().is_client_error());
+    let config = crate::config::Config::default();
+    let analysis_service = Arc::new(AnalysisServiceImpl::new(
+        parser_factory,
+        vuln_repo.clone(),
+        cache_service.clone(),
+        &config,
+    ));
+    let report_service = Arc::new(ReportServiceImpl::new());
+
+    // Create popular package service with test config
+    let config = Arc::new(crate::Config::default());
+    let popular_package_service = Arc::new(PopularPackageServiceImpl::new(
+        vuln_repo.clone(),
+        cache_service.clone(),
+        config,
+    ));
+    // Provide a simple version resolution service for tests
+    let version_resolution_service = Arc::new(VersionResolutionServiceImpl::new(Arc::new(
+        MultiplexRegistryClient::new(),
+    )));
+
+    AppState {
+        analysis_service,
+        cache_service,
+        report_service,
+        vulnerability_repository: vuln_repo,
+        popular_package_service,
+        repository_analysis_service: None,
+        version_resolution_service,
     }
+}
+
+#[tokio::test]
+async fn docs_disabled_returns_404() {
+    let mut config = crate::Config::default();
+    config.server.enable_docs = false;
+    let app = create_router(dummy_state(), &config);
+    let response = app
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/docs")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn docs_enabled_returns_ok() {
+    let mut config = crate::Config::default();
+    config.server.enable_docs = true;
+    let app = create_router(dummy_state(), &config);
+    let response = app
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/docs")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    //note: Swagger UI may redirect (303) before serving index depending on version
+    assert!(
+        matches!(response.status(), StatusCode::OK | StatusCode::SEE_OTHER),
+        "unexpected status: {}",
+        response.status()
+    );
+}
+
+#[tokio::test]
+async fn repository_analysis_disabled_returns_error() {
+    let mut config = crate::Config::default();
+    config.server.enable_docs = false;
+    let app = create_router(dummy_state(), &config);
+    let body = serde_json::json!({"repository_url": "https://github.com/rust-lang/cargo"});
+    let response = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/v1/analyze/repository")
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(response.status().is_server_error() || response.status().is_client_error());
 }

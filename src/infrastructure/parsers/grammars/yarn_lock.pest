@@ -1,0 +1,123 @@
+///////////////////////////////////////////////////////////
+// Pest grammar scaffold for yarn.lock (v1-compatible)
+//
+// Scope: Provide a permissive grammar that can recognize
+//        the general structure of yarn.lock entries.
+//        Precise validations and captures can be refined
+//        in later phases.
+//
+// References:
+// - Yarn v1 lockfile format
+// - Typical entry form:
+//
+//   lodash@^4.17.21, lodash@~4.17.20:
+//     version "4.17.21"
+//     resolved "https://registry.yarnpkg.com/lodash/-/lodash-4.17.21.tgz#...."
+//     integrity sha512-....
+//     dependencies:
+//       brace-expansion "^1.1.7"
+//
+// Notes:
+// - This is a scaffold. It aims to accept common shapes,
+//   not to enforce all invariants.
+// - We keep indentation 2-space based as per Yarn v1 convention.
+// - Quoted and bare specifiers are accepted in headers.
+// - Comments and blank lines are permitted anywhere.
+//
+// TODO (follow-ups):
+// - Tighten key/value matching and add typed captures
+// - Support additional fields (e.g., "bundledDependencies", "peerDependencies")
+// - Add error recovery & better diagnostics for malformed sections
+///////////////////////////////////////////////////////////
+
+SP         = _{ " " }
+NEWLINE    = _{ "\r\n" | "\n" }
+COMMENT    = _{ "#" ~ (!NEWLINE ~ ANY)* }
+OPT_SP     = _{ SP* }
+
+INDENT     = _{ "  " }              // two spaces
+INDENT2    = _{ INDENT ~ INDENT }   // four spaces
+
+quoted_char = _{ "\\\"" | "\\\\" | !"\"" ~ ANY }
+quoted_string = @{ "\"" ~ quoted_char* ~ "\"" }
+
+// A "bare" fragment that stops at ',', ':', or newline
+bare_fragment = @{ (!("," | ":" | NEWLINE) ~ ANY)+ }
+
+// A key specifier appearing in header list.
+// Accept quoted string or a bare fragment (e.g., lodash@^4.17.21)
+key_spec = _{ quoted_string | bare_fragment }
+
+key_list = { key_spec ~ (OPT_SP ~ "," ~ OPT_SP ~ key_spec)* }
+
+header = { key_list ~ OPT_SP ~ ":" }
+
+// Property lines within an entry
+version_line    = { INDENT ~ "version"    ~ OPT_SP ~ quoted_string ~ line_ending }
+resolved_line   = { INDENT ~ "resolved"   ~ OPT_SP ~ quoted_string ~ line_ending }
+integrity_line  = { INDENT ~ "integrity"  ~ OPT_SP ~ (!NEWLINE ~ ANY)* ~ line_ending }
+
+// Dependencies block:
+//   dependencies:
+//     name "range"
+// or
+//     name ^1.2.3
+dependencies_block = {
+    INDENT ~ "dependencies" ~ OPT_SP ~ ":" ~ line_ending
+    ~ dep_kv_line+
+}
+
+optional_dependencies_block = {
+    INDENT ~ "optionalDependencies" ~ OPT_SP ~ ":" ~ line_ending
+    ~ dep_kv_line+
+}
+
+peer_dependencies_block = {
+    INDENT ~ "peerDependencies" ~ OPT_SP ~ ":" ~ line_ending
+    ~ dep_kv_line+
+}
+
+bundled_dependencies_block = {
+    INDENT ~ "bundledDependencies" ~ OPT_SP ~ ":" ~ line_ending
+    ~ (dep_kv_line | dep_name_line)+
+}
+
+dep_name_line = {
+    INDENT2 ~ dep_key ~ line_ending
+}
+
+// A dependency key-value line (4 spaces indentation)
+// Accept quoted or bare value ranges.
+dep_kv_line = {
+    INDENT2
+    ~ dep_key
+    ~ OPT_SP
+    ~ dep_value
+    ~ line_ending
+}
+
+dep_key   = @{ (!SP ~ !NEWLINE ~ ANY)+ }
+dep_value = _{ quoted_string | bare_fragment }
+
+comment_line = { OPT_SP ~ COMMENT ~ NEWLINE }
+blank_line   = { OPT_SP ~ NEWLINE }
+line_ending  = _{ NEWLINE | EOI }
+
+// An entry is a header followed by one or more property lines or blocks.
+// Allow comments/blank lines interspersed.
+entry = {
+    header ~ (line_ending)?
+    ~ ( version_line
+      | resolved_line
+      | integrity_line
+      | dependencies_block
+      | optional_dependencies_block
+      | peer_dependencies_block
+      | bundled_dependencies_block
+      | comment_line
+      | blank_line
+      )*
+}
+
+// The whole file: comments/blank lines allowed anywhere between entries.
+file = { SOI ~ (comment_line | blank_line)* ~ entry* ~ (comment_line | blank_line)* ~ EOI }

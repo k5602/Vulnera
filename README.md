@@ -13,7 +13,7 @@ Vulnera is a fast, scalable, multi-ecosystem vulnerability analysis toolkit and 
 - **Multi-Ecosystem Support:** npm, PyPI, Maven/Gradle, Cargo, Go, Packagist, and more
 - **Aggregated Vulnerability Data:** Combines OSV, NVD, and GitHub Security Advisories
 - **Async & Concurrent:** Built with Tokio for high throughput and bounded concurrency
-- **Smart Caching:** Filesystem-based, TTL-configurable cache for reduced API calls
+- **Smart Caching & Recommendations:** Filesystem-based, TTL-configurable cache for reduced API calls; safe version recommendations (nearest and most up-to-date), upgrade impact classification (major/minor/patch), and next safe minor within current major, with a prerelease exclusion toggle
 - **Domain-Driven Design:** Clean separation of domain, application, infrastructure, and presentation layers
 - **OpenAPI Documentation:** Auto-generated Swagger UI for easy API exploration
 - **Secure by Default:** Input validation, rate limiting, and secure API handling
@@ -83,6 +83,8 @@ curl -X POST http://localhost:3000/api/v1/analyze/repository \
 - **Rust:** `Cargo.toml`, `Cargo.lock`
 - **Go:** `go.mod`, `go.sum`
 - **PHP:** `composer.json`, `composer.lock`
+- **Ruby:** `Gemfile`, `Gemfile.lock`
+- **.NET (NuGet):** `packages.config`, `*.csproj` (PackageReference), `*.props`/`*.targets` (central management)
 
 ---
 
@@ -90,13 +92,16 @@ curl -X POST http://localhost:3000/api/v1/analyze/repository \
 
 - Configurable via TOML files in `config/` and environment variables (prefix `VULNERA__`)
 
-- Profiles: `development`, `staging`, `production` (set via `ENV`)
+- Profiles: `development`, `production` (set via `ENV`)
 
 - Example environment overrides:
-  
+
   ```bash
   VULNERA__SERVER__PORT=8080
   VULNERA__CACHE__TTL_HOURS=24
+  VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES=3
+  VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES=false
+  VULNERA__RECOMMENDATIONS__MAX_VERSION_QUERIES_PER_REQUEST=50
   VULNERA__APIS__NVD__API_KEY=your_nvd_api_key
   VULNERA__APIS__GHSA__TOKEN=your_github_token
   ```
@@ -113,7 +118,7 @@ Vulnera is built with **Domain-Driven Design (DDD)** and a layered architecture:
 - **Presentation Layer:** HTTP API, DTOs, OpenAPI, middleware
 
 **Core Flow:**
-Dependency file → Parser → AggregatingVulnerabilityRepository (parallel API calls, merge results) → AnalysisReport → Optional reporting/caching.
+Dependency file → Parser → Concurrent package processing (default: 3 packages in parallel) → AggregatingVulnerabilityRepository (parallel API calls per package, merge results) → AnalysisReport → Optional reporting/caching.
 
 **Caching:**
 Filesystem-based, SHA256 keys, TTL configurable. Always use provided cache key helpers.
@@ -123,10 +128,50 @@ Early mapping to domain/application errors, graceful degradation, and clear API 
 
 ---
 
+## ⚡ Performance Tuning
+
+Vulnera supports several configuration options to optimize performance for your specific use case:
+
+### Concurrent Package Processing
+
+Control how many packages are analyzed simultaneously:
+
+```bash
+# Default: 3 packages processed in parallel
+VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES=3
+
+# For larger systems with better resources
+VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES=8
+
+# For systems with API rate limits or resource constraints
+VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES=1
+```
+
+**Performance Impact:**
+
+- **3 packages (default)**: ~3x faster than sequential processing, balanced for API rate limits
+- **Higher values**: Better performance for large dependency files, but may hit API rate limits
+- **Lower values**: Safer for constrained environments or strict rate limits
+
+### Other Performance Settings
+
+```bash
+# Vulnerability data caching (reduces API calls)
+VULNERA__CACHE__TTL_HOURS=24
+
+# File fetching concurrency for repository analysis
+VULNERA__APIS__GITHUB__MAX_CONCURRENT_FILE_FETCHES=8
+
+# Version query limits for recommendations
+VULNERA__RECOMMENDATIONS__MAX_VERSION_QUERIES_PER_REQUEST=50
+```
+
+---
+
 ## 🧑‍💻 Development & Contribution
 
 - **Dev Setup:**
-  
+
   ```bash
   make -C scripts/build_workflow install-deps
   pre-commit install
@@ -160,7 +205,7 @@ Please read `CONTRIBUTING.md` and `CODE_OF_CONDUCT.md` before opening PRs. We we
 ## 🚢 Deployment
 
 - **Docker:**
-  
+
   ```bash
   docker build -t vulnera-rust .
   docker run -p 3000:3000 vulnera-rust
@@ -192,7 +237,7 @@ Please read `CONTRIBUTING.md` and `CODE_OF_CONDUCT.md` before opening PRs. We we
 - **Cache issues:** Clear `.vulnera_cache` or adjust TTL
 
 - **Debugging:**
-  
+
   ```bash
   VULNERA__LOGGING__LEVEL=debug cargo run
   ```
@@ -201,14 +246,12 @@ Please read `CONTRIBUTING.md` and `CODE_OF_CONDUCT.md` before opening PRs. We we
 
 ## 📜 Changelog
 
-- v3.0.0: Rust rewrite, multi-ecosystem, async, aggregation, caching, OpenAPI, Docker
+- See CHANGELOG.md for the latest updates, including safe version recommendations, extended registry support (Packagist, Go proxy, Maven Central), upgrade impact metadata, next safe minor hints, prerelease exclusion toggle, and request-level caps on version queries.
 - Planned items are tracked in “Roadmap: Next Features” at the end of this file.
 
 ---
 
 ## 🦀 Why Rust? (vs Python)
-
-Vulnera was rewritten from Python to Rust for several reasons:
 
 - **Performance:** Rust is compiled and memory-safe, enabling much faster analysis and lower latency than Python’s interpreter.
 - **Concurrency:** Tokio async runtime allows true parallelism and efficient IO, while Python’s async is limited by the GIL.
@@ -216,9 +259,6 @@ Vulnera was rewritten from Python to Rust for several reasons:
 - **Security:** Rust eliminates entire classes of memory safety vulnerabilities (buffer overflows, use-after-free) that can affect Python extensions.
 - **Scalability:** Rust’s async and concurrency model scales to thousands of requests with minimal resources.
 - **Ecosystem:** Rust’s package ecosystem (crates.io) and tooling (cargo, clippy, rustfmt) support modern development practices.
-
-**Legacy Python:**
-The original Vulnera was written in Python for rapid prototyping, but hit limits in performance, reliability, and maintainability. The Rust rewrite delivers a robust, production-grade backend for cloud-native deployments.
 
 ---
 

@@ -16,9 +16,7 @@ hsts_include_subdomains = false # Don't include subdomains in dev
 [cache]
 ttl_hours = 1
 
-[apis.osv]
-base_url = "https://api.osv.dev/v1"
-timeout_seconds = 30
+
 
 [apis.nvd]
 base_url = "https://services.nvd.nist.gov/rest/json"

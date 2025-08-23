@@ -55,6 +55,12 @@ struct CircuitBreakerState {
     half_open_requests: u32,
 }
 
+impl Default for CircuitBreaker {
+    fn default() -> Self {
+        Self::new(CircuitBreakerConfig::default())
+    }
+}
+
 impl CircuitBreaker {
     /// Create a new circuit breaker with the given configuration
     pub fn new(config: CircuitBreakerConfig) -> Self {
@@ -70,7 +76,7 @@ impl CircuitBreaker {
     }
 
     /// Create a circuit breaker with default configuration
-    pub fn default() -> Self {
+    pub fn with_default_config() -> Self {
         Self::new(CircuitBreakerConfig::default())
     }
 
@@ -572,7 +578,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_health_checker() {
-        let circuit_breaker = CircuitBreaker::default();
+        let circuit_breaker = Default::default();
         let health_checker = HealthChecker::new(circuit_breaker);
 
         // Healthy service

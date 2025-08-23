@@ -55,13 +55,6 @@ struct GraphQLLocation {
     column: u32, // Column number in GraphQL query
 }
 
-/// Security advisories query response
-#[derive(Debug, Deserialize)]
-struct SecurityAdvisoriesResponse {
-    #[serde(rename = "securityAdvisories")]
-    security_advisories: SecurityAdvisoriesConnection,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct SecurityAdvisoriesConnection {
     nodes: Vec<SecurityAdvisory>,
@@ -102,7 +95,7 @@ struct SecurityAdvisoryVulnerabilities {
     nodes: Vec<Vulnerability>, // Future: vulnerability nodes processing
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct Vulnerability {
     #[allow(dead_code)]
     package: VulnerabilityPackage, // Future: package-specific vulnerability details
@@ -114,7 +107,7 @@ struct Vulnerability {
     first_patched_version: Option<FirstPatchedVersion>, // Future: patch version tracking
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct VulnerabilityPackage {
     #[allow(dead_code)]
     name: String, // Future: package name processing
@@ -122,7 +115,7 @@ struct VulnerabilityPackage {
     ecosystem: String, // Future: ecosystem-specific logic
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct FirstPatchedVersion {
     #[allow(dead_code)]
     identifier: String, // Future: patch version identifier processing
@@ -252,39 +245,27 @@ impl GhsaClient {
     ) -> Result<SecurityAdvisoriesConnection, VulnerabilityError> {
         let query = r#"
             query SecurityAdvisories($packageName: String!, $ecosystem: SecurityAdvisoryEcosystem!, $first: Int!, $after: String) {
-                securityAdvisories(
+                securityAdvisories: securityVulnerabilities(
                     first: $first
                     after: $after
-                    orderBy: { field: PUBLISHED_AT, direction: DESC }
-                    packageName: $packageName
+                    orderBy: { field: UPDATED_AT, direction: DESC }
+                    package: $packageName
                     ecosystem: $ecosystem
                 ) {
                     nodes {
-                        ghsaId
-                        summary
-                        description
-                        severity
-                        publishedAt
-                        references {
-                            url
+                        advisory {
+                            ghsaId
+                            summary
+                            description
+                            severity
+                            publishedAt
+                            references { url }
                         }
-                        vulnerabilities(first: 10) {
-                            nodes {
-                                package {
-                                    name
-                                    ecosystem
-                                }
-                                vulnerableVersionRange
-                                firstPatchedVersion {
-                                    identifier
-                                }
-                            }
-                        }
+                        package { name ecosystem }
+                        vulnerableVersionRange
+                        firstPatchedVersion { identifier }
                     }
-                    pageInfo {
-                        hasNextPage
-                        endCursor
-                    }
+                    pageInfo { hasNextPage endCursor }
                 }
             }
         "#;
@@ -299,17 +280,157 @@ impl GhsaClient {
             variables["after"] = serde_json::Value::String(cursor.to_string());
         }
 
-        let response: SecurityAdvisoriesResponse = self.execute_query(query, variables).await?;
-        Ok(response.security_advisories)
+        // Fetch as raw JSON and adapt to our existing advisory-shaped model; we will group later.
+        let raw: serde_json::Value = self.execute_query(query, variables).await?;
+
+        let page_info: PageInfo = serde_json::from_value(
+            raw["securityAdvisories"]["pageInfo"].clone(),
+        )
+        .map_err(|_| {
+            VulnerabilityError::Api(ApiError::Http {
+                status: 500,
+                message: "Invalid GHSA pageInfo shape".to_string(),
+            })
+        })?;
+
+        let mut nodes: Vec<SecurityAdvisory> = Vec::new();
+        if let Some(items) = raw["securityAdvisories"]["nodes"].as_array() {
+            for item in items {
+                let advisory = &item["advisory"];
+                let ghsa_id = advisory["ghsaId"].as_str().unwrap_or_default().to_string();
+                let summary = advisory["summary"].as_str().unwrap_or_default().to_string();
+                let description = advisory["description"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                let severity = advisory["severity"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                let published_at = advisory["publishedAt"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+
+                let references: Vec<Reference> = advisory["references"]
+                    .as_array()
+                    .unwrap_or(&Vec::new())
+                    .iter()
+                    .filter_map(|r| r.get("url").and_then(|u| u.as_str()))
+                    .map(|url| Reference {
+                        url: url.to_string(),
+                    })
+                    .collect();
+
+                let package = VulnerabilityPackage {
+                    name: item["package"]["name"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                    ecosystem: item["package"]["ecosystem"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                };
+                let vulnerable_version_range = item["vulnerableVersionRange"]
+                    .as_str()
+                    .map(|s| s.to_string());
+                let first_patched_version =
+                    item["firstPatchedVersion"]["identifier"]
+                        .as_str()
+                        .map(|id| FirstPatchedVersion {
+                            identifier: id.to_string(),
+                        });
+
+                let vuln = Vulnerability {
+                    package,
+                    vulnerable_version_range,
+                    first_patched_version,
+                };
+
+                nodes.push(SecurityAdvisory {
+                    ghsa_id,
+                    summary,
+                    description,
+                    severity,
+                    published_at,
+                    references,
+                    vulnerabilities: SecurityAdvisoryVulnerabilities { nodes: vec![vuln] },
+                });
+            }
+        }
+
+        Ok(SecurityAdvisoriesConnection { nodes, page_info })
     }
 
     /// Convert GHSA security advisory to RawVulnerability
     fn convert_ghsa_advisory(advisory: SecurityAdvisory) -> RawVulnerability {
+        use super::traits::{AffectedPackageData, PackageInfo, VersionEventData, VersionRangeData};
+
         let references = advisory.references.into_iter().map(|r| r.url).collect();
 
         let published_at = chrono::DateTime::parse_from_rfc3339(&advisory.published_at)
             .ok()
             .map(|dt| dt.with_timezone(&chrono::Utc));
+
+        // Map GHSA vulnerabilities to affected package data with fixed events
+        let affected = advisory
+            .vulnerabilities
+            .nodes
+            .into_iter()
+            .map(|v| {
+                // Map GHSA ecosystem values to strings understood by our aggregator
+                // NPM -> "npm", PIP -> "PyPI", MAVEN -> "Maven", RUST -> "crates.io",
+                // GO -> "Go", COMPOSER -> "Packagist", RUBYGEMS -> "RubyGems", NUGET -> "NuGet"
+                let ecosystem = match v.package.ecosystem.as_str() {
+                    "NPM" => "npm".to_string(),
+                    "PIP" => "PyPI".to_string(),
+                    "MAVEN" => "Maven".to_string(),
+                    "RUST" => "crates.io".to_string(),
+                    "GO" => "Go".to_string(),
+                    "COMPOSER" => "Packagist".to_string(),
+                    "RUBYGEMS" => "RubyGems".to_string(),
+                    "NUGET" => "NuGet".to_string(),
+                    other => other.to_string(),
+                };
+
+                // Build events: use an "introduced" sentinel when we have a vulnerable range,
+                // and add a "fixed" event when firstPatchedVersion is present.
+                let mut events: Vec<VersionEventData> = Vec::new();
+                if v.vulnerable_version_range.as_ref().is_some() {
+                    events.push(VersionEventData {
+                        event_type: "introduced".to_string(),
+                        value: "0".to_string(), // sentinel lower bound when not explicitly provided
+                    });
+                }
+                if let Some(fp) = v.first_patched_version.as_ref() {
+                    events.push(VersionEventData {
+                        event_type: "fixed".to_string(),
+                        value: fp.identifier.clone(),
+                    });
+                }
+
+                let ranges = if events.is_empty() {
+                    None
+                } else {
+                    Some(vec![VersionRangeData {
+                        range_type: "SEMVER".to_string(),
+                        repo: None,
+                        events,
+                    }])
+                };
+
+                AffectedPackageData {
+                    package: PackageInfo {
+                        name: v.package.name,
+                        ecosystem,
+                        purl: None,
+                    },
+                    ranges,
+                    versions: None,
+                }
+            })
+            .collect();
 
         RawVulnerability {
             id: advisory.ghsa_id,
@@ -318,7 +439,7 @@ impl GhsaClient {
             severity: Some(advisory.severity),
             references,
             published_at,
-            affected: vec![], // TODO: Extract affected packages from GHSA data
+            affected,
         }
     }
 
@@ -346,7 +467,22 @@ impl GhsaClient {
             cursor = connection.page_info.end_cursor;
         }
 
-        Ok(all_advisories)
+        // Group by GHSA ID to merge vulnerability nodes belonging to the same advisory
+        let mut by_id: std::collections::HashMap<String, SecurityAdvisory> =
+            std::collections::HashMap::new();
+        for adv in all_advisories {
+            by_id
+                .entry(adv.ghsa_id.clone())
+                .and_modify(|existing| {
+                    existing
+                        .vulnerabilities
+                        .nodes
+                        .extend(adv.vulnerabilities.nodes.clone());
+                })
+                .or_insert(adv);
+        }
+
+        Ok(by_id.into_values().collect())
     }
 }
 
@@ -448,29 +584,25 @@ mod tests {
                 "securityAdvisories": {
                     "nodes": [
                         {
-                            "ghsaId": "GHSA-xxxx-xxxx-xxxx",
-                            "summary": "Test vulnerability",
-                            "description": "A test vulnerability for unit testing",
-                            "severity": "HIGH",
-                            "publishedAt": "2022-01-01T00:00:00Z",
-                            "references": [
-                                {
-                                    "url": "https://example.com/advisory"
-                                }
-                            ],
-                            "vulnerabilities": {
-                                "nodes": [
+                            "advisory": {
+                                "ghsaId": "GHSA-xxxx-xxxx-xxxx",
+                                "summary": "Test vulnerability",
+                                "description": "A test vulnerability for unit testing",
+                                "severity": "HIGH",
+                                "publishedAt": "2022-01-01T00:00:00Z",
+                                "references": [
                                     {
-                                        "package": {
-                                            "name": "express",
-                                            "ecosystem": "NPM"
-                                        },
-                                        "vulnerableVersionRange": "< 4.18.0",
-                                        "firstPatchedVersion": {
-                                            "identifier": "4.18.0"
-                                        }
+                                        "url": "https://example.com/advisory"
                                     }
                                 ]
+                            },
+                            "package": {
+                                "name": "express",
+                                "ecosystem": "NPM"
+                            },
+                            "vulnerableVersionRange": "< 4.18.0",
+                            "firstPatchedVersion": {
+                                "identifier": "4.18.0"
                             }
                         }
                     ],
@@ -520,18 +652,25 @@ mod tests {
                 "securityAdvisories": {
                     "nodes": [
                         {
-                            "ghsaId": "GHSA-xxxx-xxxx-xxxx",
-                            "summary": "Test vulnerability",
-                            "description": "A test vulnerability for unit testing",
-                            "severity": "HIGH",
-                            "publishedAt": "2022-01-01T00:00:00Z",
-                            "references": [
-                                {
-                                    "url": "https://example.com/advisory"
-                                }
-                            ],
-                            "vulnerabilities": {
-                                "nodes": []
+                            "advisory": {
+                                "ghsaId": "GHSA-xxxx-xxxx-xxxx",
+                                "summary": "Test vulnerability",
+                                "description": "A test vulnerability for unit testing",
+                                "severity": "HIGH",
+                                "publishedAt": "2022-01-01T00:00:00Z",
+                                "references": [
+                                    {
+                                        "url": "https://example.com/advisory"
+                                    }
+                                ]
+                            },
+                            "package": {
+                                "name": "express",
+                                "ecosystem": "NPM"
+                            },
+                            "vulnerableVersionRange": "< 4.18.0",
+                            "firstPatchedVersion": {
+                                "identifier": "4.18.0"
                             }
                         }
                     ],
@@ -739,7 +878,7 @@ mod tests {
         assert!(result.is_ok());
         let connection = result.unwrap();
         assert_eq!(connection.nodes.len(), 0);
-        assert_eq!(connection.page_info.has_next_page, false);
+        assert!(!connection.page_info.has_next_page);
     }
 
     #[tokio::test]

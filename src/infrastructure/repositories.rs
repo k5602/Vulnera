@@ -77,7 +77,15 @@ impl AggregatingVulnerabilityRepository {
                 "Go" | "go" => Ecosystem::Go,
                 "Maven" | "maven" => Ecosystem::Maven,
                 "Packagist" | "packagist" => Ecosystem::Packagist,
-                _ => continue, // Skip unknown ecosystems
+                "RubyGems" | "rubygems" => Ecosystem::RubyGems,
+                "NuGet" | "nuget" => Ecosystem::NuGet,
+                _ => {
+                    debug!(
+                        "Unknown ecosystem '{}', skipping affected entry",
+                        affected_data.package.ecosystem
+                    );
+                    continue;
+                }
             };
 
             // Parse affected versions and ranges
@@ -222,6 +230,16 @@ impl AggregatingVulnerabilityRepository {
                 }
             }
 
+            // Check if it's a CVSS vector string and extract severity from impact scores
+            if severity.starts_with("CVSS:") {
+                let parsed_severity = self.parse_cvss_vector_severity(severity);
+                debug!(
+                    "Parsed CVSS vector '{}' as severity: {}",
+                    severity, parsed_severity
+                );
+                return parsed_severity;
+            }
+
             // If parsing as float fails, try string matching
             let severity_lower = severity.to_lowercase();
             match severity_lower.as_str() {
@@ -240,7 +258,77 @@ impl AggregatingVulnerabilityRepository {
         }
     }
 
-    /// Deduplicate and merge vulnerabilities from multiple sources
+    /// Parse CVSS vector string to estimate severity based on impact metrics
+    ///
+    /// This function handles both CVSS v2 and v3 vector strings that GitHub may return
+    /// instead of simple severity strings. It extracts the Confidentiality (C), Integrity (I),
+    /// and Availability (A) impact scores and maps them to our Severity enum.
+    ///
+    /// CVSS v3 format: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H
+    /// CVSS v2 format: CVSS:2.0/AV:N/AC:L/Au:N/C:C/I:C/A:C
+    ///
+    /// Impact values:
+    /// - v3: H=High, L=Low, N=None
+    /// - v2: C=Complete, P=Partial, N=None
+    fn parse_cvss_vector_severity(&self, cvss_vector: &str) -> Severity {
+        // Parse CVSS vector components to estimate severity
+        // Format v3: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H
+        // Format v2: CVSS:2.0/AV:N/AC:L/Au:N/C:P/I:P/A:P
+
+        let mut confidentiality_impact = "N";
+        let mut integrity_impact = "N";
+        let mut availability_impact = "N";
+
+        // Split by '/' and parse each component
+        for component in cvss_vector.split('/') {
+            if let Some((key, value)) = component.split_once(':') {
+                match key {
+                    "C" => confidentiality_impact = value,
+                    "I" => integrity_impact = value,
+                    "A" => availability_impact = value,
+                    _ => continue,
+                }
+            }
+        }
+
+        // Normalize impact values for both CVSS v2 and v3
+        // v3: H=High, L=Low, N=None
+        // v2: C=Complete, P=Partial, N=None
+        let normalize_impact = |impact: &str| -> u8 {
+            match impact {
+                "H" | "C" => 3, // High/Complete
+                "L" | "P" => 2, // Low/Partial
+                "N" => 1,       // None
+                _ => 1,         // Default to None
+            }
+        };
+
+        let c_score = normalize_impact(confidentiality_impact);
+        let i_score = normalize_impact(integrity_impact);
+        let a_score = normalize_impact(availability_impact);
+
+        // Calculate total impact score
+        let total_score = c_score + i_score + a_score;
+        let high_impacts = [c_score, i_score, a_score]
+            .iter()
+            .filter(|&&score| score == 3)
+            .count();
+
+        // Map to severity based on impact distribution
+        match (high_impacts, total_score) {
+            // Multiple high/complete impacts = Critical
+            (2.., _) => Severity::Critical,
+            // Single high/complete impact = High
+            (1, _) => Severity::High,
+            // Multiple partial impacts or high total = Medium
+            (0, 6..) => Severity::Medium,
+            // Some impact but not severe = Medium
+            (0, 4..=5) => Severity::Medium,
+            // Minimal impact = Low
+            _ => Severity::Low,
+        }
+    }
+
     fn deduplicate_vulnerabilities(
         &self,
         vulnerabilities: Vec<Vulnerability>,
@@ -681,9 +769,76 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_parse_severity_cvss_vectors() {
+        let repo = create_test_repo();
+
+        // Test CVSS vector parsing with different impact combinations
+
+        // Critical: Multiple high impacts (C:H/I:H/A:H)
+        assert_eq!(
+            repo.parse_severity(&Some(
+                "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H".to_string()
+            )),
+            Severity::Critical
+        );
+
+        // Critical: Two high impacts (C:H/I:H/A:N)
+        assert_eq!(
+            repo.parse_severity(&Some(
+                "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N".to_string()
+            )),
+            Severity::Critical
+        );
+
+        // High: Single high impact (C:N/I:N/A:H)
+        assert_eq!(
+            repo.parse_severity(&Some(
+                "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H".to_string()
+            )),
+            Severity::High
+        );
+
+        // Medium: Multiple low impacts (C:L/I:L/A:N)
+        assert_eq!(
+            repo.parse_severity(&Some(
+                "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N".to_string()
+            )),
+            Severity::Medium
+        );
+
+        // Medium: Single low impact (C:N/I:L/A:N)
+        assert_eq!(
+            repo.parse_severity(&Some(
+                "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N".to_string()
+            )),
+            Severity::Medium
+        );
+
+        // Low: No impacts (C:N/I:N/A:N)
+        assert_eq!(
+            repo.parse_severity(&Some(
+                "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N".to_string()
+            )),
+            Severity::Low
+        );
+
+        // Test CVSS v2 format (P=Partial in v2)
+        assert_eq!(
+            repo.parse_severity(&Some("CVSS:2.0/AV:N/AC:L/Au:N/C:P/I:P/A:P".to_string())),
+            Severity::Medium
+        );
+
+        // Test CVSS v2 with complete impact (C=Complete in v2)
+        assert_eq!(
+            repo.parse_severity(&Some("CVSS:2.0/AV:N/AC:L/Au:N/C:C/I:C/A:C".to_string())),
+            Severity::Critical
+        );
+    }
+
     fn create_test_repo() -> AggregatingVulnerabilityRepository {
         // Create mock clients for testing
-        let osv_client = Arc::new(OsvClient::new("https://api.osv.dev".to_string()));
+        let osv_client = Arc::new(OsvClient);
         let nvd_client = Arc::new(NvdClient::new(
             "https://services.nvd.nist.gov".to_string(),
             None,
