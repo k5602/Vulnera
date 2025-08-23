@@ -23,7 +23,10 @@ use crate::presentation::{
         },
         health::{detailed_health_check, health_check, liveness_probe, metrics, readiness_probe},
     },
-    middleware::{https_enforcement_middleware, logging_middleware, security_headers_middleware},
+    middleware::{
+        ghsa_token_middleware, https_enforcement_middleware, logging_middleware,
+        security_headers_middleware,
+    },
     models::*,
 };
 use axum::{
@@ -137,6 +140,8 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
                     axum::http::header::ORIGIN,
                     axum::http::header::ACCESS_CONTROL_REQUEST_METHOD,
                     axum::http::header::ACCESS_CONTROL_REQUEST_HEADERS,
+                    axum::http::HeaderName::from_static("x-ghsa-token"),
+                    axum::http::HeaderName::from_static("x-github-token"),
                 ])
                 .allow_credentials(false)
                 .max_age(Duration::from_secs(3600))
@@ -168,6 +173,8 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
                     axum::http::header::ORIGIN,
                     axum::http::header::ACCESS_CONTROL_REQUEST_METHOD,
                     axum::http::header::ACCESS_CONTROL_REQUEST_HEADERS,
+                    axum::http::HeaderName::from_static("x-ghsa-token"),
+                    axum::http::HeaderName::from_static("x-github-token"),
                 ])
                 .allow_credentials(false)
                 .max_age(Duration::from_secs(3600))
@@ -191,6 +198,8 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
         .layer(TimeoutLayer::new(Duration::from_secs(
             config.server.request_timeout_seconds,
         )))
+        // Per-request GHSA token middleware (must run before handlers)
+        .layer(middleware::from_fn(ghsa_token_middleware))
         // Custom logging middleware
         .layer(middleware::from_fn(logging_middleware));
 

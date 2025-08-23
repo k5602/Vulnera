@@ -46,16 +46,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let parser_factory = Arc::new(ParserFactory::new());
 
     // Create API clients
-    let osv_client = Arc::new(OsvClient::new("https://api.osv.dev".to_string()));
+    let osv_base = {
+        let raw = config.apis.osv.base_url.clone();
+        if raw.ends_with("/v1/") {
+            raw.trim_end_matches("/v1/").to_string()
+        } else if raw.ends_with("/v1") {
+            raw.trim_end_matches("/v1").to_string()
+        } else {
+            raw
+        }
+    };
+    let osv_client = Arc::new(OsvClient::new(osv_base));
     let nvd_client = Arc::new(NvdClient::new(
-        "https://services.nvd.nist.gov/rest/json".to_string(),
-        None, // No API key by default
+        config.apis.nvd.base_url.clone(),
+        config.apis.nvd.api_key.clone(),
     ));
+    let ghsa_token_opt = config.apis.ghsa.token.clone().filter(|t| !t.is_empty());
+    if ghsa_token_opt.is_none() {
+        tracing::info!(
+            "GHSA token not provided; GitHub advisories lookups will be skipped unless provided via environment."
+        );
+    }
     let ghsa_client = Arc::new(GhsaClient::new(
-        config.apis.ghsa.token.clone().unwrap_or_else(|| {
-            tracing::warn!("No GitHub token configured, GHSA API may have limited functionality");
-            String::new()
-        }),
+        ghsa_token_opt.unwrap_or_default(),
         config.apis.ghsa.graphql_url.clone(),
     ));
 

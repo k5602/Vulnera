@@ -1471,7 +1471,19 @@ impl<C: CacheService> AnalysisService for AnalysisServiceImpl<C> {
         let vulnerabilities = self.process_packages_sequentially(packages.clone()).await?;
 
         let analysis_duration = start_time.elapsed();
-        let sources_queried = vec!["OSV".to_string(), "NVD".to_string(), "GHSA".to_string()];
+        let sources_queried = {
+            let mut set = std::collections::BTreeSet::new();
+            for v in &vulnerabilities {
+                for src in &v.sources {
+                    set.insert(format!("{:?}", src));
+                }
+            }
+            if set.is_empty() {
+                vec!["OSV".to_string(), "NVD".to_string()]
+            } else {
+                set.into_iter().collect()
+            }
+        };
 
         let report = AnalysisReport::new(
             packages,

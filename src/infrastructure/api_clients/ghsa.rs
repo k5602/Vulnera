@@ -8,6 +8,23 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+// Task-local request-scoped GHSA token.
+// Middleware or handlers can scope a token for the lifetime of a request using
+// `with_request_ghsa_token(token, async { ... }).await;`
+tokio::task_local! {
+    static GHSA_REQ_TOKEN: String;
+}
+
+/// Scope a request-scoped GHSA token for the duration of the provided future.
+/// Any GHSA client calls within this future (and not crossing a task boundary)
+/// will pick up the token via task-local storage.
+pub async fn with_request_ghsa_token<F, T>(token: String, fut: F) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    GHSA_REQ_TOKEN.scope(token, fut).await
+}
+
 /// GraphQL query request structure
 #[derive(Debug, Serialize)]
 struct GraphQLRequest {
@@ -167,14 +184,36 @@ impl GhsaClient {
             variables,
         };
 
-        let response = self
+        // Determine token from environment at request time, falling back to configured token
+        let token_opt = GHSA_REQ_TOKEN
+            .try_with(|t| t.clone())
+            .ok()
+            .filter(|t| !t.is_empty())
+            .or_else(|| {
+                if !self.token.is_empty() {
+                    Some(self.token.clone())
+                } else {
+                    None
+                }
+            });
+
+        // Build request and add Authorization header only if token present
+        let mut req = self
             .client
             .post(&self.graphql_url)
-            .header("Authorization", format!("Bearer {}", self.token))
             .header("Content-Type", "application/json")
-            .json(&request_body)
-            .send()
-            .await?;
+            .json(&request_body);
+
+        if let Some(tok) = token_opt {
+            req = req.header("Authorization", format!("Bearer {}", tok));
+        } else {
+            return Err(VulnerabilityError::Api(ApiError::Http {
+                status: 401,
+                message: "Missing GitHub token for GHSA lookups; set VULNERA__APIS__GHSA__TOKEN or provide Authorization/X-GHSA-Token".to_string(),
+            }));
+        }
+
+        let response = req.send().await?;
 
         if !response.status().is_success() {
             let status = response.status().as_u16();
@@ -636,6 +675,71 @@ mod tests {
         assert!(result.is_ok());
         let vulnerability = result.unwrap();
         assert!(vulnerability.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_security_advisories_requires_token() {
+        let server = Server::new_async().await;
+
+        // Minimal GraphQL error response isn't needed; client returns 401 before calling server
+        let client = GhsaClient::new("".to_string(), format!("{}/graphql", server.url()));
+
+        let result = client.security_advisories("express", "NPM", 1, None).await;
+
+        // Expect a 401 error due to missing token
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            VulnerabilityError::Api(ApiError::Http { status, message }) => {
+                assert_eq!(status, 401);
+                assert!(
+                    message.contains("Missing GitHub token"),
+                    "unexpected message: {}",
+                    message
+                );
+            }
+            other => panic!("unexpected error: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_with_request_scoped_token_applies_authorization_header() {
+        let mut server = Server::new_async().await;
+
+        let mock_response = json!({
+            "data": {
+                "securityAdvisories": {
+                    "nodes": [],
+                    "pageInfo": {
+                        "hasNextPage": false,
+                        "endCursor": null
+                    }
+                }
+            }
+        });
+
+        let mock = server
+            .mock("POST", "/graphql")
+            .match_header("authorization", "Bearer scoped-token-123")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(mock_response.to_string())
+            .expect(1)
+            .create_async()
+            .await;
+
+        let client = GhsaClient::new("".to_string(), format!("{}/graphql", server.url()));
+
+        let result = crate::infrastructure::api_clients::ghsa::with_request_ghsa_token(
+            "scoped-token-123".to_string(),
+            async { client.security_advisories("express", "NPM", 1, None).await },
+        )
+        .await;
+
+        mock.assert_async().await;
+        assert!(result.is_ok());
+        let connection = result.unwrap();
+        assert_eq!(connection.nodes.len(), 0);
+        assert_eq!(connection.page_info.has_next_page, false);
     }
 
     #[tokio::test]

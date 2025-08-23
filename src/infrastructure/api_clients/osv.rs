@@ -23,7 +23,7 @@ struct OsvPackage {
 /// Response from OSV query endpoint
 #[derive(Debug, Deserialize)]
 struct OsvQueryResponse {
-    vulns: Vec<OsvVulnerability>,
+    vulns: Option<Vec<OsvVulnerability>>,
 }
 
 /// OSV vulnerability data structure
@@ -70,7 +70,15 @@ struct OsvVersionEvent {
 struct OsvSeverity {
     #[serde(rename = "type")]
     severity_type: String,
-    score: Option<String>,
+    #[serde(default)]
+    score: Option<OsvSeverityScore>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum OsvSeverityScore {
+    String(String),
+    Number(f64),
 }
 
 #[derive(Debug, Deserialize)]
@@ -124,13 +132,17 @@ impl OsvClient {
             .severity
             .as_ref()
             .and_then(|severities| {
-                // Look for CVSS severity first, then any other severity
+                // Prefer any CVSS variant (e.g., CVSS_V3, CVSS_V2); fallback to first available
                 severities
                     .iter()
-                    .find(|s| s.severity_type == "CVSS_V3")
+                    .find(|s| s.severity_type.starts_with("CVSS"))
                     .or_else(|| severities.first())
             })
-            .and_then(|s| s.score.clone());
+            .and_then(|s| match &s.score {
+                Some(OsvSeverityScore::String(v)) => Some(v.clone()),
+                Some(OsvSeverityScore::Number(n)) => Some(n.to_string()),
+                None => None,
+            });
 
         let references = osv_vuln
             .references
@@ -139,10 +151,12 @@ impl OsvClient {
             .map(|r| r.url)
             .collect();
 
-        let published_at = osv_vuln
-            .published
-            .and_then(|p| chrono::DateTime::parse_from_rfc3339(&p).ok())
-            .map(|dt| dt.with_timezone(&chrono::Utc));
+        let published_at = osv_vuln.published.as_deref().and_then(|p| {
+            // OSV requires RFC 3339 UTC timestamps (e.g., 2023-11-15T12:34:56Z)
+            chrono::DateTime::parse_from_rfc3339(p)
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+                .ok()
+        });
 
         // Convert affected packages
         let affected = osv_vuln
@@ -227,6 +241,7 @@ impl VulnerabilityApiClient for OsvClient {
 
         let vulnerabilities = osv_response
             .vulns
+            .unwrap_or_default()
             .into_iter()
             .map(Self::convert_osv_vulnerability)
             .collect();

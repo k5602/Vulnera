@@ -72,17 +72,16 @@ Notes:
 - Server clamps file count and total bytes per scan based on `apis.github` caps in config.
 - Configure a token for better GitHub rate limits.
 
-
 ## Supported Ecosystems
 
-| Ecosystem | Identifier | Supported Files |
-|-----------|------------|-----------------|
-| Node.js | `npm` | package.json, package-lock.json, yarn.lock |
-| Python | `pypi`, `pip`, `python` | requirements.txt, Pipfile, pyproject.toml |
-| Java | `maven` | pom.xml, build.gradle |
-| Rust | `cargo`, `rust` | Cargo.toml, Cargo.lock |
-| Go | `go` | go.mod, go.sum |
-| PHP | `packagist`, `composer`, `php` | composer.json, composer.lock |
+| Ecosystem | Identifier                     | Supported Files                            |
+| --------- | ------------------------------ | ------------------------------------------ |
+| Node.js   | `npm`                          | package.json, package-lock.json, yarn.lock |
+| Python    | `pypi`, `pip`, `python`        | requirements.txt, Pipfile, pyproject.toml  |
+| Java      | `maven`                        | pom.xml, build.gradle                      |
+| Rust      | `cargo`, `rust`                | Cargo.toml, Cargo.lock                     |
+| Go        | `go`                           | go.mod, go.sum                             |
+| PHP       | `packagist`, `composer`, `php` | composer.json, composer.lock               |
 
 ## Response Examples
 

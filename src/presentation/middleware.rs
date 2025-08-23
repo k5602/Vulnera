@@ -212,3 +212,47 @@ pub async fn logging_middleware(request: Request<axum::body::Body>, next: Next) 
 
     response
 }
+
+/// Middleware to scope a per-request GHSA token from headers.
+/// Accepts X-GHSA-Token, X-GitHub-Token, or Authorization: Bearer|token <token>.
+pub async fn ghsa_token_middleware(request: Request<axum::body::Body>, next: Next) -> Response {
+    // Extract token from headers before moving the request into the next service
+    let ghsa_token = {
+        let headers = request.headers();
+        headers
+            .get("x-ghsa-token")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+            .or_else(|| {
+                headers
+                    .get("x-github-token")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string())
+            })
+            .or_else(|| {
+                headers
+                    .get(axum::http::header::AUTHORIZATION)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| {
+                        let s = s.trim();
+                        if let Some(rest) = s.strip_prefix("token ") {
+                            Some(rest.to_string())
+                        } else if let Some(rest) = s.strip_prefix("Bearer ") {
+                            Some(rest.to_string())
+                        } else {
+                            None
+                        }
+                    })
+            })
+    };
+
+    if let Some(token) = ghsa_token {
+        // Scope the token for the lifetime of this request using task-local storage
+        crate::infrastructure::api_clients::ghsa::with_request_ghsa_token(token, async {
+            next.run(request).await
+        })
+        .await
+    } else {
+        next.run(request).await
+    }
+}
