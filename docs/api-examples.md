@@ -11,7 +11,7 @@ Currently, the API does not require authentication for core endpoints. For repos
 ## Base URL
 
 - **Development**: `http://localhost:3000`
-- **Staging**: `https://staging.vulnera.dev`
+
 - **Production**: `https://api.vulnera.dev`
 
 ## Quick Start Examples
@@ -207,32 +207,38 @@ curl "http://localhost:3000/metrics"
 ### JavaScript/Node.js
 
 ```javascript
-const axios = require('axios');
+const axios = require("axios");
 
 class VulneraClient {
-  constructor(baseURL = 'http://localhost:3000') {
+  constructor(baseURL = "http://localhost:3000") {
     this.client = axios.create({ baseURL });
   }
 
   async analyzePackageJson(packageJsonContent) {
     try {
-      const response = await this.client.post('/api/v1/analyze', {
+      const response = await this.client.post("/api/v1/analyze", {
         file_content: packageJsonContent,
-        ecosystem: 'npm',
-        filename: 'package.json'
+        ecosystem: "npm",
+        filename: "package.json",
       });
       return response.data;
     } catch (error) {
-      throw new Error(`Analysis failed: ${error.response?.data?.message || error.message}`);
+      throw new Error(
+        `Analysis failed: ${error.response?.data?.message || error.message}`,
+      );
     }
   }
 
   async getVulnerability(vulnerabilityId) {
     try {
-      const response = await this.client.get(`/api/v1/vulnerabilities/${vulnerabilityId}`);
+      const response = await this.client.get(
+        `/api/v1/vulnerabilities/${vulnerabilityId}`,
+      );
       return response.data;
     } catch (error) {
-      throw new Error(`Failed to get vulnerability: ${error.response?.data?.message || error.message}`);
+      throw new Error(
+        `Failed to get vulnerability: ${error.response?.data?.message || error.message}`,
+      );
     }
   }
 }
@@ -240,9 +246,12 @@ class VulneraClient {
 // Usage
 const client = new VulneraClient();
 const packageJson = '{"dependencies": {"express": "4.17.1"}}';
-client.analyzePackageJson(packageJson)
-  .then(result => console.log('Vulnerabilities found:', result.vulnerabilities.length))
-  .catch(error => console.error('Error:', error.message));
+client
+  .analyzePackageJson(packageJson)
+  .then((result) =>
+    console.log("Vulnerabilities found:", result.vulnerabilities.length),
+  )
+  .catch((error) => console.error("Error:", error.message));
 ```
 
 ### Python

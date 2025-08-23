@@ -73,18 +73,12 @@ pub struct CacheConfig {
 /// External API configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiConfig {
-    pub osv: OsvConfig,
     pub nvd: NvdConfig,
     pub ghsa: GhsaConfig,
     pub github: GitHubConfig,
 }
 
 /// OSV API configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OsvConfig {
-    pub base_url: String,
-    pub timeout_seconds: u64,
-}
 
 /// NVD API configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,10 +143,6 @@ impl Default for Config {
                 ttl_hours: 24,
             },
             apis: ApiConfig {
-                osv: OsvConfig {
-                    base_url: "https://api.osv.dev/v1".to_string(),
-                    timeout_seconds: 30,
-                },
                 nvd: NvdConfig {
                     base_url: "https://services.nvd.nist.gov/rest/json".to_string(),
                     api_key: None,

@@ -19,9 +19,7 @@ hsts_include_subdomains = true
 directory = ".vulnera_cache"
 ttl_hours = 24
 
-[apis.osv]
-base_url = "https://api.osv.dev/v1"
-timeout_seconds = 30
+
 
 [apis.nvd]
 base_url = "https://services.nvd.nist.gov/rest/json"

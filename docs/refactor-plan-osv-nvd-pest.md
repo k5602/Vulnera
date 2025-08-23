@@ -275,7 +275,7 @@ Phase 1: OSV Adapter Swap
 
 - Status: Completed — OSV adapter swapped to use the `osv` crate end-to-end (`osv::client::query_package` + `osv::client::vulnerability`), manual HTTP removed, mapping to `RawVulnerability` preserved, all tests passing.
 - Verification: cargo check and tests completed — Commands run: `cargo check`, `cargo test -q`. Result: 171 tests passed, 0 failed; build succeeded.
-- Notes: Mockito-based HTTP tests were removed in favor of crate-level OSV calls; ecosystem conversion tests retained. Next, proceed to Phase 2 (NVD local adapter). Optionally run `make -C scripts/build_workflow ci-check` locally and capture outcomes.
+- Notes: Mockito-based HTTP tests were removed in favor of crate-level OSV calls; ecosystem conversion tests retained. OSV config fields (`apis.osv.base_url`, `apis.osv.timeout_seconds`) were removed from `Config` since the `osv` crate manages endpoints internally. Next, proceed to Phase 2 (NVD local adapter). Optionally run `make -C scripts/build_workflow ci-check` locally and capture outcomes.
 
 - Replace internals of `infrastructure/api_clients/osv.rs` to use `osv` crate while keeping file path and trait name stable.
 - Keep test coverage; ensure parity with existing tests.

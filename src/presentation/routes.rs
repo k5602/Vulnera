@@ -86,7 +86,7 @@ use axum::{
     ),
     servers(
         (url = "http://localhost:3000", description = "Local development server"),
-        (url = "https://staging.vulnera.dev", description = "Staging environment"),
+
         (url = "https://api.vulnera.dev", description = "Production server")
     ),
     external_docs(
