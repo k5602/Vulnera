@@ -7,6 +7,7 @@ pub mod php;
 pub mod python;
 pub mod rust;
 pub mod traits;
+pub mod yarn_pest;
 
 #[cfg(test)]
 mod comprehensive_tests;
@@ -18,3 +19,4 @@ pub use php::*;
 pub use python::*;
 pub use rust::*;
 pub use traits::*;
+pub use yarn_pest::*;

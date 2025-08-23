@@ -41,6 +41,9 @@ impl ParserFactory {
             crate::infrastructure::parsers::npm::PackageLockParser::new(),
         ));
         parsers.push(Box::new(
+            crate::infrastructure::parsers::yarn_pest::YarnPestParser::new(),
+        ));
+        parsers.push(Box::new(
             crate::infrastructure::parsers::npm::YarnLockParser::new(),
         ));
 

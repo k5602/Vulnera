@@ -290,6 +290,7 @@ Phase 3: Pest Parsers (Priority Formats)
 - New modules + grammar files for yarn.lock and Gradle (kts/gradle).
 - Swap `ParserFactory` to use Pest implementations with higher priority than legacy regex parser for those files.
 - Validate against comprehensive fixtures.
+- and quick-xml for Maven (pom.xml) instead of regex.
 
 Phase 4: Cleanups & Docs
 
@@ -297,7 +298,9 @@ Phase 4: Cleanups & Docs
 - Update docs and examples; add admin instructions for NVD dataset bootstrap/update.
 - Final regression and `make ci-check`.
 
-Phase 5: Optional
+Phase 5 : fixed version and updated version algorithm and feedback overhaul
+
+Phase 6: Optional
 
 - Extend Pest to other tricky formats (pip-tools/uv.lock); evaluate ROI.
 
