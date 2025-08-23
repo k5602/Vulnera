@@ -292,7 +292,80 @@ Phase 3: Pest Parsers (Priority Formats)
 - Validate against comprehensive fixtures.
 - and quick-xml for Maven (pom.xml) instead of regex.
 
-Phase 4 : add ruby and c# parsers for ruby gems and .nuget and analyse how we grab fixed version and updated version algorithm and feedback overhaul
+Phase 4: Safe Version Recommendation & GHSA Integration
+
+- Status: Parsers done — RubyGems (Gemfile, Gemfile.lock) and NuGet (.csproj/.fsproj/.vbproj, packages.config) implemented, registered in ParserFactory, and fully tested. Starting Phase 4 now.
+- Objective: For each dependency, return two upgrade options when current version is known:
+  1. nearest_safe_above_current — the smallest safe version greater than or equal to the current version.
+  2. most_up_to_date_safe — the newest safe version available.
+     If current is unknown, still compute most_up_to_date_safe. If latest is vulnerable, fall back to the newest safe below latest. When no stable safe exists, allow pre-release as a last resort (with a note). Use GHSA alongside OSV for fixed versions/ranges.
+
+- Algorithm (VersionResolutionService):
+  1. Fetch available versions via PackageRegistryClient per ecosystem (initially: npm, PyPI, RubyGems, NuGet). Normalize versions (lenient parsing for 4-segment variants in Ruby/NuGet; detect prerelease; exclude yanked/unlisted when available).
+  2. Build vulnerability predicate from merged OSV + GHSA:
+     - OSV affected ranges and events (introduced/fixed/last_affected).
+     - GHSA vulnerableVersionRange + firstPatchedVersion mapped into RawVulnerability.affected as OSV-like events (add “fixed” when firstPatchedVersion exists).
+     - A version is vulnerable if any affected package ranges contain it and it is not present in fixed_versions for that affected package.
+  3. Compute safe sets:
+     - safe_all = all versions not vulnerable
+     - safe_stable = safe_all ∩ not prerelease
+  4. Select recommendations:
+     - most_up_to_date_safe:
+       - If safe_stable non-empty: max(safe_stable)
+       - Else if safe_all non-empty: max(safe_all) and note prerelease
+       - Else: None (no known fix)
+     - nearest_safe_above_current (only if current known):
+       - min(safe_stable where v >= current), else min(safe_all where v >= current)
+       - If none: None
+  5. Fallbacks:
+     - If registry unavailable, attempt nearest using the minimal fixed version >= current from OSV/GHSA; leave most_up_to_date_safe as None with a note.
+  6. Notes/flags:
+     - Mark when a prerelease was chosen due to lack of stable safe versions.
+     - Preserve reasons when no safe versions exist (“no known fix”).
+
+- GHSA Integration Work:
+  - Extend GHSA client to populate RawVulnerability.affected:
+    - Map vulnerableVersionRange (parse to semver range when possible; otherwise mark as ecosystem range with best-effort bounds).
+    - Map firstPatchedVersion to a “fixed” event value.
+  - Aggregation: union fixed_versions and vulnerable_ranges across OSV + GHSA for the same package, keeping existing dedup behavior by vulnerability ID and merging sources/references.
+
+- PackageRegistryClient (initial scope and caching):
+  - npm: registry.npmjs.org/{name} — dist-tags.latest and versions[].
+  - PyPI: pypi.org/pypi/{name}/json — releases (+ yanked info).
+  - RubyGems: rubygems.org/api/v1/versions/{name}.json.
+  - NuGet: api.nuget.org v3 flat container index + registration for metadata.
+  - Cargo: crates.io API (/api/v1/crates/{name}) — crate metadata (versions[]).
+  - Cache version lists (TTL 6–12h) and respect rate limits/backoff.
+
+- API & DTO (additive-only):
+  - Add VersionRecommendation fields to dependency analysis results:
+    - nearest_safe_above_current: Option<String>
+    - most_up_to_date_safe: Option<String>
+    - notes: Option<Vec<String>> (e.g., “only prereleases are safe”, “registry unavailable”)
+  - Keep backward compatibility (new optional fields).
+
+- Acceptance Criteria (Phase 4):
+  - For a vulnerable latest: most_up_to_date_safe returns the highest safe below latest.
+  - With a known current: nearest_safe_above_current returns the minimal safe ≥ current.
+  - When only prereleases are safe: recommendations provided with a note.
+  - GHSA-provided firstPatchedVersion influences fixed_versions and alters recommendations accordingly.
+  - When no safe versions exist: both fields None with a clear note; overall behavior documented.
+  - Tests cover algorithm edge cases and GHSA mapping.
+
+- Risks & Mitigations (Phase 4):
+  - Registry availability and rate limits → cache aggressively; use backoff; partial fallback on OSV/GHSA fixed versions.
+  - Non-semver ranges (ecosystem-specific) → best-effort parsing; prefer explicit fixed versions when present.
+  - Pre-release semantics differ across ecosystems → conservative policy (prefer stable; allow prerelease only when necessary).
+
+- Work Items (Phase 4):
+  - application/: add VersionResolutionService and unit tests.
+  - infrastructure/api_clients/ghsa.rs: extend mapping to affected packages with fixed events and ranges.
+  - infrastructure/registries/: introduce PackageRegistryClient + minimal npm/PyPI/RubyGems/NuGet implementations with caching/resilience.
+  - presentation/: extend DTOs and response assembly to include both recommendations per dependency; update OpenAPI.
+  - Add integration tests for recommendation outcomes with mocked registry + OSV/GHSA inputs.
+
+- Start:
+  - Begin GHSA affected mapping and VersionResolutionService implementation first, then wire registries and DTO updates.
 
 Phase 5: Cleanups & Docs
 

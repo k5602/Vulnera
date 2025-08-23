@@ -305,11 +305,72 @@ impl GhsaClient {
 
     /// Convert GHSA security advisory to RawVulnerability
     fn convert_ghsa_advisory(advisory: SecurityAdvisory) -> RawVulnerability {
+        use super::traits::{AffectedPackageData, PackageInfo, VersionEventData, VersionRangeData};
+
         let references = advisory.references.into_iter().map(|r| r.url).collect();
 
         let published_at = chrono::DateTime::parse_from_rfc3339(&advisory.published_at)
             .ok()
             .map(|dt| dt.with_timezone(&chrono::Utc));
+
+        // Map GHSA vulnerabilities to affected package data with fixed events
+        let affected = advisory
+            .vulnerabilities
+            .nodes
+            .into_iter()
+            .map(|v| {
+                // Map GHSA ecosystem values to strings understood by our aggregator
+                // NPM -> "npm", PIP -> "PyPI", MAVEN -> "Maven", RUST -> "crates.io",
+                // GO -> "Go", COMPOSER -> "Packagist", RUBYGEMS -> "RubyGems", NUGET -> "NuGet"
+                let ecosystem = match v.package.ecosystem.as_str() {
+                    "NPM" => "npm".to_string(),
+                    "PIP" => "PyPI".to_string(),
+                    "MAVEN" => "Maven".to_string(),
+                    "RUST" => "crates.io".to_string(),
+                    "GO" => "Go".to_string(),
+                    "COMPOSER" => "Packagist".to_string(),
+                    "RUBYGEMS" => "RubyGems".to_string(),
+                    "NUGET" => "NuGet".to_string(),
+                    other => other.to_string(),
+                };
+
+                // Build events: use an "introduced" sentinel when we have a vulnerable range,
+                // and add a "fixed" event when firstPatchedVersion is present.
+                let mut events: Vec<VersionEventData> = Vec::new();
+                if v.vulnerable_version_range.as_ref().is_some() {
+                    events.push(VersionEventData {
+                        event_type: "introduced".to_string(),
+                        value: "0".to_string(), // sentinel lower bound when not explicitly provided
+                    });
+                }
+                if let Some(fp) = v.first_patched_version.as_ref() {
+                    events.push(VersionEventData {
+                        event_type: "fixed".to_string(),
+                        value: fp.identifier.clone(),
+                    });
+                }
+
+                let ranges = if events.is_empty() {
+                    None
+                } else {
+                    Some(vec![VersionRangeData {
+                        range_type: "SEMVER".to_string(),
+                        repo: None,
+                        events,
+                    }])
+                };
+
+                AffectedPackageData {
+                    package: PackageInfo {
+                        name: v.package.name,
+                        ecosystem,
+                        purl: None,
+                    },
+                    ranges,
+                    versions: None,
+                }
+            })
+            .collect();
 
         RawVulnerability {
             id: advisory.ghsa_id,
@@ -318,7 +379,7 @@ impl GhsaClient {
             severity: Some(advisory.severity),
             references,
             published_at,
-            affected: vec![], // TODO: Extract affected packages from GHSA data
+            affected,
         }
     }
 

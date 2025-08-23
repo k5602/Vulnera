@@ -1,4 +1,75 @@
 //! Application services for orchestrating business logic
+//
+// Version Resolution Service (skeleton)
+//
+// This follows the DDD layering: the application layer defines the service that
+// orchestrates registry lookups (infrastructure) and vulnerability data (domain)
+// to compute upgrade recommendations. The concrete implementation is injected
+// via Arc and uses the PackageRegistryClient trait from the infrastructure layer.
+
+/// Concrete implementation of VersionResolutionService using a registry client.
+/// Registry client is injected (no instantiation here) to respect DI and DDD boundaries.
+pub struct VersionResolutionServiceImpl<R>
+where
+    R: crate::infrastructure::registries::PackageRegistryClient,
+{
+    registry: std::sync::Arc<R>,
+}
+
+impl<R> VersionResolutionServiceImpl<R>
+where
+    R: crate::infrastructure::registries::PackageRegistryClient,
+{
+    pub fn new(registry: std::sync::Arc<R>) -> Self {
+        Self { registry }
+    }
+}
+
+#[async_trait::async_trait]
+impl<R> super::VersionResolutionService for VersionResolutionServiceImpl<R>
+where
+    R: crate::infrastructure::registries::PackageRegistryClient + 'static,
+{
+    #[tracing::instrument(skip(self, name, current, vulnerabilities))]
+    async fn recommend(
+        &self,
+        ecosystem: crate::domain::Ecosystem,
+        name: &str,
+        current: Option<crate::domain::Version>,
+        vulnerabilities: &[crate::domain::Vulnerability],
+    ) -> Result<super::VersionRecommendation, crate::application::errors::ApplicationError> {
+        // SKELETON IMPLEMENTATION:
+        // - Uses registry to fetch versions (best-effort; ignore failures for now)
+        // - Returns placeholders for nearest and most-up-to-date safe recommendations
+        // - The full algorithm will be implemented in subsequent steps of Phase 4
+
+        // Best-effort registry fetch (ignore errors to avoid blocking analysis flow).
+        let _versions = crate::infrastructure::registries::PackageRegistryClient::list_versions(
+            &*self.registry,
+            ecosystem,
+            name,
+        )
+        .await
+        .unwrap_or_default();
+
+        // Placeholder: compute recommendations later using OSV + GHSA merged model
+        let mut notes = Vec::new();
+        if current.is_some() && !vulnerabilities.is_empty() {
+            notes.push("version resolution pending: algorithm will compute nearest and most up-to-date safe versions".to_string());
+        } else {
+            notes.push(
+                "version resolution pending: insufficient context or no vulnerabilities"
+                    .to_string(),
+            );
+        }
+
+        Ok(super::VersionRecommendation {
+            nearest_safe_above_current: None,
+            most_up_to_date_safe: None,
+            notes,
+        })
+    }
+}
 
 use async_trait::async_trait;
 use std::time::{Duration, Instant};
