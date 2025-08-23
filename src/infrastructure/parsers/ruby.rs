@@ -191,7 +191,7 @@ impl GemfileLockParser {
         let re_spec_line = Regex::new(r#"^\s{4}([A-Za-z0-9_\-\.]+)\s+\(([^)]+)\)"#).unwrap();
 
         for line in content.lines() {
-            let trimmed = line.trim_end();
+            let trimmed = line.trim();
 
             if trimmed == "GEM" {
                 in_gem_section = true;
