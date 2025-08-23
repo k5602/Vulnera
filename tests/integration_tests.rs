@@ -48,7 +48,4 @@ async fn test_external_dependencies() {
     } else {
         println!("OSV API is not reachable (network issue or timeout)");
     }
-
-    // Always pass since network connectivity shouldn't fail tests
-    // no-op: do not assert on constant in external dependency test
 }
