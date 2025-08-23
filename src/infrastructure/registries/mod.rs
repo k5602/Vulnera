@@ -443,6 +443,204 @@ impl PackageRegistryClient for CratesIoRegistryClient {
     }
 }
 
+/// Packagist (Composer) Registry client (https://repo.packagist.org/packages/{name}.json)
+pub struct PackagistRegistryClient;
+
+#[async_trait]
+impl PackageRegistryClient for PackagistRegistryClient {
+    async fn list_versions(
+        &self,
+        ecosystem: Ecosystem,
+        name: &str,
+    ) -> Result<Vec<VersionInfo>, RegistryError> {
+        if ecosystem != Ecosystem::Packagist {
+            return Err(RegistryError::UnsupportedEcosystem(ecosystem));
+        }
+        let url = format!("https://repo.packagist.org/packages/{}.json", name);
+        let resp = reqwest::get(&url).await.map_err(|e| RegistryError::Http {
+            message: e.to_string(),
+            status: None,
+        })?;
+
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(RegistryError::NotFound);
+        }
+        if !resp.status().is_success() {
+            return Err(RegistryError::Http {
+                message: format!("status {}", resp.status()),
+                status: Some(resp.status().as_u16()),
+            });
+        }
+
+        let json: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| RegistryError::Parse(e.to_string()))?;
+
+        let versions_obj = json
+            .get("package")
+            .and_then(|p| p.get("versions"))
+            .and_then(|v| v.as_object())
+            .ok_or_else(|| RegistryError::Parse("missing package.versions".to_string()))?;
+
+        let mut out: Vec<VersionInfo> = Vec::new();
+        for (ver_str, _meta) in versions_obj.iter() {
+            if let Some(v) = parse_version_lenient(ver_str).or_else(|| Version::parse(ver_str).ok())
+            {
+                out.push(VersionInfo::new(v, false, None));
+            }
+        }
+
+        out.sort_by(|a, b| a.version.cmp(&b.version));
+        Ok(out)
+    }
+}
+
+/// Go module proxy client (https://proxy.golang.org/{module}/@v/list)
+pub struct GoProxyRegistryClient;
+
+#[async_trait]
+impl PackageRegistryClient for GoProxyRegistryClient {
+    async fn list_versions(
+        &self,
+        ecosystem: Ecosystem,
+        name: &str,
+    ) -> Result<Vec<VersionInfo>, RegistryError> {
+        if ecosystem != Ecosystem::Go {
+            return Err(RegistryError::UnsupportedEcosystem(ecosystem));
+        }
+        let url = format!("https://proxy.golang.org/{}/@v/list", name);
+        let resp = reqwest::get(&url).await.map_err(|e| RegistryError::Http {
+            message: e.to_string(),
+            status: None,
+        })?;
+
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(RegistryError::NotFound);
+        }
+        if !resp.status().is_success() {
+            return Err(RegistryError::Http {
+                message: format!("status {}", resp.status()),
+                status: Some(resp.status().as_u16()),
+            });
+        }
+
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| RegistryError::Parse(e.to_string()))?;
+
+        let mut out: Vec<VersionInfo> = Vec::new();
+        for line in body.lines() {
+            let ver_str = line.trim();
+            if ver_str.is_empty() {
+                continue;
+            }
+            if let Some(v) = parse_version_lenient(ver_str).or_else(|| Version::parse(ver_str).ok())
+            {
+                out.push(VersionInfo::new(v, false, None));
+            }
+        }
+
+        out.sort_by(|a, b| a.version.cmp(&b.version));
+        Ok(out)
+    }
+}
+
+/// Maven Central client (https://repo1.maven.org/maven2/{groupPath}/{artifact}/maven-metadata.xml)
+/// Expects name in the form "group:artifact"
+pub struct MavenCentralRegistryClient;
+
+#[async_trait]
+impl PackageRegistryClient for MavenCentralRegistryClient {
+    async fn list_versions(
+        &self,
+        ecosystem: Ecosystem,
+        name: &str,
+    ) -> Result<Vec<VersionInfo>, RegistryError> {
+        if ecosystem != Ecosystem::Maven {
+            return Err(RegistryError::UnsupportedEcosystem(ecosystem));
+        }
+        let parts: Vec<&str> = name.split(':').collect();
+        if parts.len() != 2 {
+            return Err(RegistryError::Parse(
+                "maven package name must be 'group:artifact'".to_string(),
+            ));
+        }
+        let group_path = parts[0].replace('.', "/");
+        let artifact = parts[1];
+        let url = format!(
+            "https://repo1.maven.org/maven2/{}/{}/maven-metadata.xml",
+            group_path, artifact
+        );
+        let resp = reqwest::get(&url).await.map_err(|e| RegistryError::Http {
+            message: e.to_string(),
+            status: None,
+        })?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(RegistryError::NotFound);
+        }
+        if !resp.status().is_success() {
+            return Err(RegistryError::Http {
+                message: format!("status {}", resp.status()),
+                status: Some(resp.status().as_u16()),
+            });
+        }
+
+        let xml = resp
+            .text()
+            .await
+            .map_err(|e| RegistryError::Parse(e.to_string()))?;
+
+        let mut out: Vec<VersionInfo> = Vec::new();
+        let mut reader = quick_xml::Reader::from_str(&xml);
+        // removed: quick-xml Reader::trim_text is not available; rely on default decoder behavior
+        let mut buf = Vec::new();
+        let mut in_version_tag = false;
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(quick_xml::events::Event::Start(e)) => {
+                    let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    if name == "version" {
+                        in_version_tag = true;
+                    }
+                }
+                Ok(quick_xml::events::Event::End(e)) => {
+                    let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    if name == "version" {
+                        in_version_tag = false;
+                    }
+                }
+                Ok(quick_xml::events::Event::Text(t)) => {
+                    if in_version_tag {
+                        let txt = reader
+                            .decoder()
+                            .decode(t.as_ref())
+                            .unwrap_or_default()
+                            .trim()
+                            .to_string();
+                        if !txt.is_empty() {
+                            if let Some(v) =
+                                parse_version_lenient(&txt).or_else(|| Version::parse(&txt).ok())
+                            {
+                                out.push(VersionInfo::new(v, false, None));
+                            }
+                        }
+                    }
+                }
+                Ok(quick_xml::events::Event::Eof) => break,
+                Err(_e) => break, // best-effort
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        out.sort_by(|a, b| a.version.cmp(&b.version));
+        Ok(out)
+    }
+}
+
 /// A multiplexer registry client that delegates to per-ecosystem clients.
 pub struct MultiplexRegistryClient {
     npm: NpmRegistryClient,
@@ -450,6 +648,9 @@ pub struct MultiplexRegistryClient {
     rubygems: RubyGemsRegistryClient,
     nuget: NuGetRegistryClient,
     crates: CratesIoRegistryClient,
+    packagist: PackagistRegistryClient,
+    goproxy: GoProxyRegistryClient,
+    maven_central: MavenCentralRegistryClient,
 }
 
 impl MultiplexRegistryClient {
@@ -460,6 +661,9 @@ impl MultiplexRegistryClient {
             rubygems: RubyGemsRegistryClient,
             nuget: NuGetRegistryClient,
             crates: CratesIoRegistryClient,
+            packagist: PackagistRegistryClient,
+            goproxy: GoProxyRegistryClient,
+            maven_central: MavenCentralRegistryClient,
         }
     }
 }
@@ -477,7 +681,9 @@ impl PackageRegistryClient for MultiplexRegistryClient {
             Ecosystem::RubyGems => self.rubygems.list_versions(ecosystem, name).await,
             Ecosystem::NuGet => self.nuget.list_versions(ecosystem, name).await,
             Ecosystem::Cargo => self.crates.list_versions(ecosystem, name).await,
-            // Others not yet supported in this multiplexer
+            Ecosystem::Packagist => self.packagist.list_versions(ecosystem, name).await,
+            Ecosystem::Go => self.goproxy.list_versions(ecosystem, name).await,
+            Ecosystem::Maven => self.maven_central.list_versions(ecosystem, name).await,
             other => Err(RegistryError::UnsupportedEcosystem(other)),
         }
     }

@@ -286,6 +286,10 @@ pub async fn analyze_repository(
     // Compute per-package version recommendations when package details are available
     let mut version_recommendations: Vec<VersionRecommendationDto> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let max_queries = std::env::var("VULNERA__RECOMMENDATIONS__MAX_VERSION_QUERIES_PER_REQUEST")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(50);
     for file in result.files.iter() {
         for pkg in file.packages.iter() {
             let identifier = format!(
@@ -311,38 +315,50 @@ pub async fn analyze_repository(
             if affecting.is_empty() {
                 continue;
             }
-            match app_state
-                .version_resolution_service
-                .recommend(
-                    pkg.ecosystem.clone(),
-                    &pkg.name,
-                    Some(pkg.version.clone()),
-                    &affecting,
-                )
-                .await
-            {
-                Ok(rec) => {
-                    version_recommendations.push(VersionRecommendationDto {
-                        package: pkg.name.clone(),
-                        ecosystem: format!("{:?}", pkg.ecosystem).to_lowercase(),
-                        current_version: Some(pkg.version.to_string()),
-                        nearest_safe_above_current: rec
-                            .nearest_safe_above_current
-                            .map(|v| v.to_string()),
-                        most_up_to_date_safe: rec.most_up_to_date_safe.map(|v| v.to_string()),
-                        notes: if rec.notes.is_empty() {
-                            None
-                        } else {
-                            Some(rec.notes)
-                        },
-                    });
-                }
-                Err(e) => {
-                    tracing::debug!(
-                        package = %pkg.identifier(),
-                        error = %e,
-                        "version recommendation for repository analysis failed"
-                    );
+            if version_recommendations.len() < max_queries {
+                match app_state
+                    .version_resolution_service
+                    .recommend(
+                        pkg.ecosystem.clone(),
+                        &pkg.name,
+                        Some(pkg.version.clone()),
+                        &affecting,
+                    )
+                    .await
+                {
+                    Ok(rec) => {
+                        version_recommendations.push(VersionRecommendationDto {
+                            package: pkg.name.clone(),
+                            ecosystem: format!("{:?}", pkg.ecosystem).to_lowercase(),
+                            current_version: Some(pkg.version.to_string()),
+                            nearest_safe_above_current: rec
+                                .nearest_safe_above_current
+                                .map(|v| v.to_string()),
+                            most_up_to_date_safe: rec.most_up_to_date_safe.map(|v| v.to_string()),
+                            next_safe_minor_within_current_major: rec
+                                .next_safe_minor_within_current_major
+                                .map(|v| v.to_string()),
+                            nearest_impact: rec
+                                .nearest_impact
+                                .map(|i| format!("{:?}", i).to_lowercase()),
+                            most_up_to_date_impact: rec
+                                .most_up_to_date_impact
+                                .map(|i| format!("{:?}", i).to_lowercase()),
+                            prerelease_exclusion_applied: Some(rec.prerelease_exclusion_applied),
+                            notes: if rec.notes.is_empty() {
+                                None
+                            } else {
+                                Some(rec.notes)
+                            },
+                        });
+                    }
+                    Err(e) => {
+                        tracing::debug!(
+                            package = %pkg.identifier(),
+                            error = %e,
+                            "version recommendation for repository analysis failed"
+                        );
+                    }
                 }
             }
         }
@@ -468,6 +484,10 @@ pub async fn analyze_dependencies(
     // Build per-package version recommendations
     let mut version_recommendations: Vec<VersionRecommendationDto> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let max_queries = std::env::var("VULNERA__RECOMMENDATIONS__MAX_VERSION_QUERIES_PER_REQUEST")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(50);
     for pkg in analysis_report.packages.iter() {
         let id = pkg.identifier();
         if !seen.insert(id) {
@@ -483,38 +503,50 @@ pub async fn analyze_dependencies(
             continue;
         }
 
-        match app_state
-            .version_resolution_service
-            .recommend(
-                pkg.ecosystem.clone(),
-                &pkg.name,
-                Some(pkg.version.clone()),
-                &affecting,
-            )
-            .await
-        {
-            Ok(rec) => {
-                version_recommendations.push(VersionRecommendationDto {
-                    package: pkg.name.clone(),
-                    ecosystem: format!("{:?}", pkg.ecosystem).to_lowercase(),
-                    current_version: Some(pkg.version.to_string()),
-                    nearest_safe_above_current: rec
-                        .nearest_safe_above_current
-                        .map(|v| v.to_string()),
-                    most_up_to_date_safe: rec.most_up_to_date_safe.map(|v| v.to_string()),
-                    notes: if rec.notes.is_empty() {
-                        None
-                    } else {
-                        Some(rec.notes)
-                    },
-                });
-            }
-            Err(e) => {
-                tracing::debug!(
-                    package = %pkg.identifier(),
-                    error = %e,
-                    "version recommendation failed"
-                );
+        if version_recommendations.len() < max_queries {
+            match app_state
+                .version_resolution_service
+                .recommend(
+                    pkg.ecosystem.clone(),
+                    &pkg.name,
+                    Some(pkg.version.clone()),
+                    &affecting,
+                )
+                .await
+            {
+                Ok(rec) => {
+                    version_recommendations.push(VersionRecommendationDto {
+                        package: pkg.name.clone(),
+                        ecosystem: format!("{:?}", pkg.ecosystem).to_lowercase(),
+                        current_version: Some(pkg.version.to_string()),
+                        nearest_safe_above_current: rec
+                            .nearest_safe_above_current
+                            .map(|v| v.to_string()),
+                        most_up_to_date_safe: rec.most_up_to_date_safe.map(|v| v.to_string()),
+                        next_safe_minor_within_current_major: rec
+                            .next_safe_minor_within_current_major
+                            .map(|v| v.to_string()),
+                        nearest_impact: rec
+                            .nearest_impact
+                            .map(|i| format!("{:?}", i).to_lowercase()),
+                        most_up_to_date_impact: rec
+                            .most_up_to_date_impact
+                            .map(|i| format!("{:?}", i).to_lowercase()),
+                        prerelease_exclusion_applied: Some(rec.prerelease_exclusion_applied),
+                        notes: if rec.notes.is_empty() {
+                            None
+                        } else {
+                            Some(rec.notes)
+                        },
+                    });
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        package = %pkg.identifier(),
+                        error = %e,
+                        "version recommendation failed"
+                    );
+                }
             }
         }
     }

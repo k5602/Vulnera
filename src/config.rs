@@ -10,6 +10,7 @@ pub struct Config {
     pub cache: CacheConfig,
     pub apis: ApiConfig,
     pub logging: LoggingConfig,
+    pub recommendations: RecommendationsConfig,
     pub popular_packages: Option<PopularPackagesConfig>,
 }
 
@@ -118,6 +119,12 @@ pub struct LoggingConfig {
     pub format: String,
 }
 
+/// Recommendations configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecommendationsConfig {
+    pub max_version_queries_per_request: usize,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -169,6 +176,9 @@ impl Default for Config {
             logging: LoggingConfig {
                 level: "info".to_string(),
                 format: "json".to_string(),
+            },
+            recommendations: RecommendationsConfig {
+                max_version_queries_per_request: 50,
             },
             popular_packages: None,
         }

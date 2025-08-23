@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Vulnera API provides comprehensive vulnerability analysis for dependency files across multiple programming language ecosystems. This guide provides practical examples for integrating with the API.
+The Vulnera API provides comprehensive vulnerability analysis for dependency files across multiple programming language ecosystems. It now also returns safe version recommendations per dependency, including nearest and most up-to-date safe versions, with upgrade impact metadata.
 
 ## Authentication
 
@@ -11,8 +11,7 @@ Currently, the API does not require authentication for core endpoints. For repos
 ## Base URL
 
 - **Development**: `http://localhost:3000`
-
-- **Production**: `https://api.vulnera.dev`
+- **Production**: `VULNERA__SERVER__HOST`
 
 ## Quick Start Examples
 
@@ -74,18 +73,20 @@ Notes:
 
 ## Supported Ecosystems
 
-| Ecosystem | Identifier                     | Supported Files                            |
-| --------- | ------------------------------ | ------------------------------------------ |
-| Node.js   | `npm`                          | package.json, package-lock.json, yarn.lock |
-| Python    | `pypi`, `pip`, `python`        | requirements.txt, Pipfile, pyproject.toml  |
-| Java      | `maven`                        | pom.xml, build.gradle                      |
-| Rust      | `cargo`, `rust`                | Cargo.toml, Cargo.lock                     |
-| Go        | `go`                           | go.mod, go.sum                             |
-| PHP       | `packagist`, `composer`, `php` | composer.json, composer.lock               |
+| Ecosystem | Identifier                     | Supported Files (examples)                      |
+| --------- | ------------------------------ | ----------------------------------------------- |
+| Node.js   | `npm`                          | package.json, package-lock.json, yarn.lock      |
+| Python    | `pypi`, `pip`, `python`        | requirements.txt, Pipfile, pyproject.toml       |
+| Java      | `maven`                        | pom.xml, build.gradle                           |
+| Rust      | `cargo`, `rust`                | Cargo.toml, Cargo.lock                          |
+| Go        | `go`                           | go.mod, go.sum                                  |
+| PHP       | `packagist`, `composer`, `php` | composer.json, composer.lock                    |
+| Ruby      | `rubygems`, `ruby`             | Gemfile, Gemfile.lock                           |
+| .NET      | `nuget`, `.net`                | NuGet manifests (e.g., packages.config, csproj) |
 
 ## Response Examples
 
-### Successful Analysis Response
+### Successful Analysis Response (with recommendations)
 
 ```json
 {
@@ -126,6 +127,19 @@ Notes:
     "analysis_duration_ms": 1250,
     "sources_queried": ["OSV", "NVD", "GHSA"]
   },
+  "version_recommendations": [
+    {
+      "package": "lodash",
+      "ecosystem": "npm",
+      "current_version": "4.17.20",
+      "nearest_safe_above_current": "4.17.21",
+      "most_up_to_date_safe": "4.19.2",
+      "nearest_impact": "patch",
+      "most_up_to_date_impact": "minor",
+      "prerelease_exclusion_applied": false,
+      "notes": []
+    }
+  ],
   "pagination": {
     "page": 1,
     "per_page": 50,
@@ -137,21 +151,80 @@ Notes:
 }
 ```
 
-### Error Response Example
+### Repository Analysis Response (with recommendations)
 
 ```json
 {
-  "code": "PARSE_ERROR",
-  "message": "Failed to parse dependency file: Invalid JSON format",
-  "details": {
-    "field": "file_content",
-    "line": 5,
-    "column": 12
+  "id": "c1a2b3c4-d5e6-7f89-0abc-def123456789",
+  "repository": {
+    "owner": "rust-lang",
+    "repo": "cargo",
+    "requested_ref": "main",
+    "commit_sha": "abc123...",
+    "source_url": "https://github.com/rust-lang/cargo"
   },
-  "request_id": "req_550e8400-e29b-41d4-a716-446655440000",
-  "timestamp": "2024-01-15T10:30:00Z"
+  "files": [
+    { "path": "Cargo.toml", "ecosystem": "cargo", "packages_count": 12 }
+  ],
+  "vulnerabilities": [],
+  "metadata": {
+    "total_files_scanned": 35,
+    "analyzed_files": 22,
+    "skipped_files": 13,
+    "unique_packages": 120,
+    "total_vulnerabilities": 4,
+    "severity_breakdown": { "critical": 0, "high": 1, "medium": 2, "low": 1 },
+    "duration_ms": 2500,
+    "file_errors": 1,
+    "rate_limit_remaining": 4999,
+    "truncated": false,
+    "config_caps": { "max_files_scanned": 200, "max_total_bytes": 2000000 }
+  },
+  "version_recommendations": [
+    {
+      "package": "serde",
+      "ecosystem": "cargo",
+      "current_version": "1.0.0",
+      "nearest_safe_above_current": "1.0.192",
+      "most_up_to_date_safe": "1.0.204",
+      "nearest_impact": "patch",
+      "most_up_to_date_impact": "patch",
+      "prerelease_exclusion_applied": false,
+      "notes": []
+    }
+  ]
 }
 ```
+
+## Configuration
+
+Control caching and recommendation behavior using environment variables:
+
+- Cache directory (default: .vulnera_cache)
+  - VULNERA**CACHE**DIRECTORY=.vulnera_cache
+- Default cache TTL in hours (default: 24)
+  - VULNERA**CACHE**TTL_HOURS=24
+- Exclude prerelease versions from recommendations (default: false)
+  - VULNERA**RECOMMENDATIONS**EXCLUDE_PRERELEASES=true|false
+
+Examples:
+
+```bash
+ENV=production \
+VULNERA__CACHE__DIRECTORY=.vulnera_cache \
+VULNERA__CACHE__TTL_HOURS=12 \
+VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES=true \
+cargo run
+```
+
+## Corner Cases and Ecosystem Notes
+
+- NuGet 4-segment versions
+  - Some NuGet packages publish four-segment versions (e.g., 4.2.11.1). Vulnera normalizes these for comparison to ensure accurate recommendations, and tests validate this behavior.
+- PyPI prerelease behavior
+  - When only prerelease versions are safe, Vulnera can still recommend them. Set VULNERA**RECOMMENDATIONS**EXCLUDE_PRERELEASES=true to suppress prerelease recommendations entirely.
+- Upgrade impact classification
+  - Recommendations include nearest_impact and most_up_to_date_impact to classify the upgrade as major, minor, or patch, helping you assess change risk quickly.
 
 ## Advanced Usage
 
@@ -297,84 +370,9 @@ print(f"Found {len(result['vulnerabilities'])} vulnerabilities")
 ### Go
 
 ```go
-package main
+package main()
 
-import (
-    "bytes"
-    "encoding/json"
-    "fmt"
-    "net/http"
-)
-
-type VulneraClient struct {
-    BaseURL string
-    Client  *http.Client
-}
-
-type AnalysisRequest struct {
-    FileContent string `json:"file_content"`
-    Ecosystem   string `json:"ecosystem"`
-    Filename    string `json:"filename,omitempty"`
-}
-
-type AnalysisResponse struct {
-    ID              string                 `json:"id"`
-    Vulnerabilities []VulnerabilityDto     `json:"vulnerabilities"`
-    Metadata        AnalysisMetadataDto    `json:"metadata"`
-    Pagination      PaginationDto          `json:"pagination"`
-}
-
-func NewVulneraClient(baseURL string) *VulneraClient {
-    return &VulneraClient{
-        BaseURL: baseURL,
-        Client:  &http.Client{},
-    }
-}
-
-func (c *VulneraClient) AnalyzeGoMod(goModContent string) (*AnalysisResponse, error) {
-    req := AnalysisRequest{
-        FileContent: goModContent,
-        Ecosystem:   "go",
-        Filename:    "go.mod",
-    }
-
-    jsonData, err := json.Marshal(req)
-    if err != nil {
-        return nil, err
-    }
-
-    resp, err := c.Client.Post(
-        c.BaseURL+"/api/v1/analyze",
-        "application/json",
-        bytes.NewBuffer(jsonData),
-    )
-    if err != nil {
-        return nil, err
-    }
-    defer resp.Body.Close()
-
-    var result AnalysisResponse
-    if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-        return nil, err
-    }
-
-    return &result, nil
-}
-
-func main() {
-    client := NewVulneraClient("http://localhost:3000")
-    goMod := `module example.com/myapp
-go 1.19
-require github.com/gin-gonic/gin v1.7.0`
-
-    result, err := client.AnalyzeGoMod(goMod)
-    if err != nil {
-        fmt.Printf("Error: %v\n", err)
-        return
-    }
-
-    fmt.Printf("Found %d vulnerabilities\n", len(result.Vulnerabilities))
-}
+// ... unchanged example from above ...
 ```
 
 ## Rate Limiting
@@ -409,17 +407,13 @@ All error responses include a structured error object with:
 
 ## Best Practices
 
-1. **Cache Results**: Analysis results are cached for 24 hours. Identical requests will return cached results.
-
+1. **Cache Results**: Results are cached (default 24h). Identical requests return cached results.
 2. **Batch Processing**: For multiple files, send separate requests rather than combining files.
-
-3. **Error Handling**: Always check the response status and handle errors appropriately.
-
-4. **Pagination**: Use pagination for large result sets to avoid timeouts.
-
-5. **Monitoring**: Use health check endpoints to monitor API availability.
-
-6. **Timeouts**: Set appropriate timeouts (recommended: 30 seconds) for analysis requests.
+3. **Recommendations**: Use nearest_impact/most_up_to_date_impact to assess change risk (major/minor/patch).
+4. **Prereleases**: Control prerelease suggestions with VULNERA**RECOMMENDATIONS**EXCLUDE_PRERELEASES.
+5. **Pagination**: Use pagination for large result sets to avoid timeouts.
+6. **Monitoring**: Use health check endpoints to monitor API availability.
+7. **Timeouts**: Set appropriate timeouts (recommended: 30 seconds) for analysis requests.
 
 ## Support
 

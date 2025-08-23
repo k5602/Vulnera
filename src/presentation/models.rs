@@ -258,6 +258,22 @@ pub struct VersionRecommendationDto {
     #[schema(example = "4.19.2")]
     pub most_up_to_date_safe: Option<String>,
 
+    /// Next safe version within the current major (if available)
+    #[schema(example = "4.18.5")]
+    pub next_safe_minor_within_current_major: Option<String>,
+
+    /// Impact classification for the nearest recommendation (major/minor/patch/unknown)
+    #[schema(example = "minor")]
+    pub nearest_impact: Option<String>,
+
+    /// Impact classification for the most up-to-date recommendation (major/minor/patch/unknown)
+    #[schema(example = "major")]
+    pub most_up_to_date_impact: Option<String>,
+
+    /// Whether prereleases were excluded by configuration when computing recommendations
+    #[schema(example = false)]
+    pub prerelease_exclusion_applied: Option<bool>,
+
     /// Notes about recommendation (e.g., prerelease chosen, registry unavailable)
     pub notes: Option<Vec<String>>,
 }

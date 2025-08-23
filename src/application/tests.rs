@@ -1089,3 +1089,171 @@ async fn test_version_resolution_ghsa_influence() {
     // Most up-to-date safe is 1.1.2
     assert_eq!(rec.most_up_to_date_safe.unwrap().to_string(), "1.1.2");
 }
+
+#[tokio::test]
+async fn test_version_resolution_nuget_four_segment() {
+    use std::sync::Arc;
+
+    // Mock registry for NuGet that returns normalized versions.
+    // Note: In production, NuGet 4-segment versions like 4.2.11.1 are normalized by the registry client
+    // to 3-segment semver (e.g., 4.2.11). Here we simulate the normalized output.
+    struct MockNuGetRegistry {
+        versions: Vec<crate::infrastructure::registries::VersionInfo>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::infrastructure::registries::PackageRegistryClient for MockNuGetRegistry {
+        async fn list_versions(
+            &self,
+            _ecosystem: crate::domain::Ecosystem,
+            _name: &str,
+        ) -> Result<
+            Vec<crate::infrastructure::registries::VersionInfo>,
+            crate::infrastructure::registries::RegistryError,
+        > {
+            Ok(self.versions.clone())
+        }
+    }
+
+    let ecosystem = crate::domain::Ecosystem::NuGet;
+    let name = "demo-nuget";
+    let current = crate::domain::Version::parse("4.2.10").unwrap();
+
+    // Simulate normalized versions: 4.2.11 (from 4.2.11.1), 4.3.0
+    let versions = vec![
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("4.2.11").unwrap(),
+            false,
+            None,
+        ),
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("4.3.0").unwrap(),
+            false,
+            None,
+        ),
+    ];
+
+    // Vulnerability: < 4.2.11 vulnerable, fixed at 4.2.11
+    let affected_pkg = crate::domain::Package::new(
+        name.to_string(),
+        crate::domain::Version::parse("0.0.0").unwrap(),
+        ecosystem.clone(),
+    )
+    .unwrap();
+    let vuln = crate::domain::Vulnerability::new(
+        crate::domain::VulnerabilityId::new("TEST-NUGET-4SEG".to_string()).unwrap(),
+        "NuGet 4-segment normalization test".into(),
+        "desc".into(),
+        crate::domain::Severity::Medium,
+        vec![crate::domain::AffectedPackage::new(
+            affected_pkg,
+            vec![crate::domain::VersionRange::less_than(
+                crate::domain::Version::parse("4.2.11").unwrap(),
+            )],
+            vec![crate::domain::Version::parse("4.2.11").unwrap()],
+        )],
+        vec![],
+        chrono::Utc::now(),
+        vec![crate::domain::VulnerabilitySource::OSV],
+    )
+    .unwrap();
+
+    let registry = Arc::new(MockNuGetRegistry { versions });
+    let svc = crate::application::VersionResolutionServiceImpl::new(registry);
+
+    let rec = svc
+        .recommend(
+            ecosystem.clone(),
+            name,
+            Some(current.clone()),
+            &[vuln.clone()],
+        )
+        .await
+        .expect("recommend ok");
+
+    // Nearest fix should be normalized 4.2.11; newest safe is 4.3.0
+    assert_eq!(
+        rec.nearest_safe_above_current.unwrap().to_string(),
+        "4.2.11"
+    );
+    assert_eq!(rec.most_up_to_date_safe.unwrap().to_string(), "4.3.0");
+}
+
+#[tokio::test]
+async fn test_version_resolution_pypi_prerelease_nuance() {
+    use std::sync::Arc;
+
+    // Mock registry for PyPI that returns only a prerelease.
+    struct MockPyPiRegistry {
+        versions: Vec<crate::infrastructure::registries::VersionInfo>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::infrastructure::registries::PackageRegistryClient for MockPyPiRegistry {
+        async fn list_versions(
+            &self,
+            _ecosystem: crate::domain::Ecosystem,
+            _name: &str,
+        ) -> Result<
+            Vec<crate::infrastructure::registries::VersionInfo>,
+            crate::infrastructure::registries::RegistryError,
+        > {
+            Ok(self.versions.clone())
+        }
+    }
+
+    let ecosystem = crate::domain::Ecosystem::PyPI;
+    let name = "demo-pypi";
+    let current = crate::domain::Version::parse("1.9.0").unwrap();
+
+    // Only prerelease is available as safe version (e.g., 2.0.0a1)
+    let versions = vec![crate::infrastructure::registries::VersionInfo::new(
+        crate::domain::Version::parse("2.0.0-alpha.1").unwrap(),
+        false,
+        None,
+    )];
+
+    // Vulnerability: < 2.0.0-alpha.1 vulnerable, fixed at 2.0.0-alpha.1
+    let affected_pkg = crate::domain::Package::new(
+        name.to_string(),
+        crate::domain::Version::parse("0.0.0").unwrap(),
+        ecosystem.clone(),
+    )
+    .unwrap();
+    let vuln = crate::domain::Vulnerability::new(
+        crate::domain::VulnerabilityId::new("TEST-PYPI-PR".to_string()).unwrap(),
+        "PyPI prerelease nuance".into(),
+        "desc".into(),
+        crate::domain::Severity::High,
+        vec![crate::domain::AffectedPackage::new(
+            affected_pkg,
+            vec![crate::domain::VersionRange::less_than(
+                crate::domain::Version::parse("2.0.0-alpha.1").unwrap(),
+            )],
+            vec![crate::domain::Version::parse("2.0.0-alpha.1").unwrap()],
+        )],
+        vec![],
+        chrono::Utc::now(),
+        vec![crate::domain::VulnerabilitySource::OSV],
+    )
+    .unwrap();
+
+    let registry = Arc::new(MockPyPiRegistry { versions });
+    let mut svc = crate::application::VersionResolutionServiceImpl::new(registry);
+    // Exclude prereleases via runtime setter to avoid global env impact
+    svc.set_exclude_prereleases(true);
+
+    let rec = svc
+        .recommend(ecosystem, name, Some(current), &[vuln])
+        .await
+        .expect("recommend ok");
+
+    // With prereleases excluded, no safe versions should be recommended
+    assert!(rec.nearest_safe_above_current.is_none());
+    assert!(rec.most_up_to_date_safe.is_none());
+    assert!(rec.prerelease_exclusion_applied);
+    assert!(
+        rec.notes.iter().any(|n| n.contains("prereleases excluded"))
+            || rec.notes.iter().any(|n| n.contains("prerelease"))
+    );
+}

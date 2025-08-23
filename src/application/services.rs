@@ -16,6 +16,8 @@ where
     registry: std::sync::Arc<R>,
     cache_service: Option<std::sync::Arc<crate::application::CacheServiceImpl>>,
     registry_versions_ttl: std::time::Duration,
+    /// When true, exclude prerelease versions from recommendations
+    exclude_prereleases: bool,
 }
 
 impl<R> VersionResolutionServiceImpl<R>
@@ -30,10 +32,17 @@ where
             .unwrap_or(24);
         let registry_versions_ttl = std::time::Duration::from_secs(ttl_hours * 3600);
 
+        // Prerelease exclusion follows env: VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES
+        let exclude_prereleases = std::env::var("VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES")
+            .ok()
+            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "True"))
+            .unwrap_or(false);
+
         Self {
             registry,
             cache_service: None,
             registry_versions_ttl,
+            exclude_prereleases,
         }
     }
 
@@ -48,11 +57,23 @@ where
             .unwrap_or(24);
         let registry_versions_ttl = std::time::Duration::from_secs(ttl_hours * 3600);
 
+        // Prerelease exclusion follows env: VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES
+        let exclude_prereleases = std::env::var("VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES")
+            .ok()
+            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "True"))
+            .unwrap_or(false);
+
         Self {
             registry,
             cache_service: Some(cache_service),
             registry_versions_ttl,
+            exclude_prereleases,
         }
+    }
+
+    /// Set whether to exclude prerelease versions from recommendations at runtime.
+    pub fn set_exclude_prereleases(&mut self, exclude: bool) {
+        self.exclude_prereleases = exclude;
     }
 }
 
@@ -149,9 +170,32 @@ where
                 candidates.into_iter().next()
             });
 
+            let nearest_impact = match (&current, &nearest_safe_above_current) {
+                (Some(c), Some(n)) => Some(crate::application::compute_upgrade_impact(c, n)),
+                _ => None,
+            };
             return Ok(super::VersionRecommendation {
                 nearest_safe_above_current,
                 most_up_to_date_safe: None,
+                next_safe_minor_within_current_major: current.as_ref().and_then(|cur| {
+                    let mut candidates: Vec<crate::domain::Version> = Vec::new();
+                    for vv in vulnerabilities {
+                        for ap in &vv.affected_packages {
+                            if ap.package.name == name && ap.package.ecosystem == ecosystem {
+                                for fx in &ap.fixed_versions {
+                                    if fx >= cur && fx.0.major == cur.0.major {
+                                        candidates.push(fx.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    candidates.sort();
+                    candidates.into_iter().next()
+                }),
+                nearest_impact,
+                most_up_to_date_impact: None,
+                prerelease_exclusion_applied: self.exclude_prereleases,
                 notes,
             });
         }
@@ -184,8 +228,19 @@ where
             }
         }
 
-        // most_up_to_date_safe: prefer stable, else prerelease
-        let most_up_to_date_safe = if let Some(last) = safe_stable.last() {
+        // most_up_to_date_safe:
+        // - if exclude_prereleases: only consider stable
+        // - otherwise prefer stable, fall back to prerelease with note
+        let most_up_to_date_safe = if self.exclude_prereleases {
+            if let Some(last) = safe_stable.last() {
+                Some(last.version.clone())
+            } else {
+                notes.push(
+                    "no known safe version (prereleases excluded by configuration)".to_string(),
+                );
+                None
+            }
+        } else if let Some(last) = safe_stable.last() {
             Some(last.version.clone())
         } else if let Some(last) = safe_all.last() {
             if last.is_prerelease {
@@ -198,8 +253,14 @@ where
             None
         };
 
-        // nearest_safe_above_current: min safe >= current (prefer stable)
+        // nearest_safe_above_current: min safe >= current
+        // - if exclude_prereleases: consider only stable candidates
+        // - otherwise prefer stable, then prerelease with note
         let nearest_safe_above_current = current.as_ref().and_then(|cur| {
+            if self.exclude_prereleases {
+                let stable_candidate = safe_stable.iter().find(|vi| vi.version >= *cur);
+                return stable_candidate.map(|c| c.version.clone());
+            }
             let stable_candidate = safe_stable.iter().find(|vi| vi.version >= *cur);
             if let Some(c) = stable_candidate {
                 return Some(c.version.clone());
@@ -214,9 +275,38 @@ where
             None
         });
 
+        let nearest_impact = match (&current, &nearest_safe_above_current) {
+            (Some(c), Some(n)) => Some(crate::application::compute_upgrade_impact(c, n)),
+            _ => None,
+        };
+        let most_up_to_date_impact = match (&current, &most_up_to_date_safe) {
+            (Some(c), Some(m)) => Some(crate::application::compute_upgrade_impact(c, m)),
+            _ => None,
+        };
         Ok(super::VersionRecommendation {
             nearest_safe_above_current,
             most_up_to_date_safe,
+            next_safe_minor_within_current_major: current.as_ref().and_then(|cur| {
+                if self.exclude_prereleases {
+                    safe_stable
+                        .iter()
+                        .find(|vi| vi.version >= *cur && vi.version.0.major == cur.0.major)
+                        .map(|vi| vi.version.clone())
+                } else if let Some(c) = safe_stable
+                    .iter()
+                    .find(|vi| vi.version >= *cur && vi.version.0.major == cur.0.major)
+                {
+                    Some(c.version.clone())
+                } else {
+                    safe_all
+                        .iter()
+                        .find(|vi| vi.version >= *cur && vi.version.0.major == cur.0.major)
+                        .map(|vi| vi.version.clone())
+                }
+            }),
+            nearest_impact,
+            most_up_to_date_impact,
+            prerelease_exclusion_applied: self.exclude_prereleases,
             notes,
         })
     }
