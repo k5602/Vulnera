@@ -48,7 +48,7 @@ cargo run
 ```bash
 docker build -t vulnera-rust .
 docker run -p 3000:3000 vulnera-rust
-````
+```
 
 ---
 
@@ -89,8 +89,11 @@ curl -X POST http://localhost:3000/api/v1/analyze/repository \
 ## ⚙️ Configuration
 
 - Configurable via TOML files in `config/` and environment variables (prefix `VULNERA__`)
+
 - Profiles: `development`, `staging`, `production` (set via `ENV`)
+
 - Example environment overrides:
+  
   ```bash
   VULNERA__SERVER__PORT=8080
   VULNERA__CACHE__TTL_HOURS=24
@@ -123,13 +126,16 @@ Early mapping to domain/application errors, graceful degradation, and clear API 
 ## 🧑‍💻 Development & Contribution
 
 - **Dev Setup:**
+  
   ```bash
   make -C scripts/build_workflow install-deps
   pre-commit install
   make dev
   ```
+
 - **Testing:**
   `make test` (unit/integration), `make ci-check` (lint, format, audit)
+
 - **Contribution:**
   Fork, branch, code, test, document, PR. Follow DDD, Rust best practices, and update OpenAPI docs for API changes.
 
@@ -154,12 +160,14 @@ Please read `CONTRIBUTING.md` and `CODE_OF_CONDUCT.md` before opening PRs. We we
 ## 🚢 Deployment
 
 - **Docker:**
-
+  
   ```bash
   docker build -t vulnera-rust .
   docker run -p 3000:3000 vulnera-rust
   ```
+
 - (Kubernetes manifests are intentionally not included in this repo yet.)
+
 - **Production:**
   Harden config, disable docs, restrict CORS, provide API keys.
 
@@ -178,10 +186,13 @@ Please read `CONTRIBUTING.md` and `CODE_OF_CONDUCT.md` before opening PRs. We we
 ## 🐞 Troubleshooting
 
 - **Build errors:** Update Rust, install system dependencies
-- **API rate limits:** Provide API keys for OSV/NVD/GHSA
-- **Cache issues:** Clear `.vulnera_cache` or adjust TTL
-- **Debugging:**
 
+- **API rate limits:** Provide API keys for OSV/NVD/GHSA
+
+- **Cache issues:** Clear `.vulnera_cache` or adjust TTL
+
+- **Debugging:**
+  
   ```bash
   VULNERA__LOGGING__LEVEL=debug cargo run
   ```

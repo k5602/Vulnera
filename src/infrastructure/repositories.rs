@@ -325,7 +325,18 @@ impl AggregatingVulnerabilityRepository {
             match osv_client.query_vulnerabilities(&package_clone).await {
                 Ok(raw_vulns) => Ok((raw_vulns, VulnerabilitySource::OSV)),
                 Err(e) => {
-                    warn!("OSV query failed for {}: {}", package_clone.identifier(), e);
+                    match e {
+                        VulnerabilityError::Json(_) => {
+                            debug!(
+                                "OSV JSON decode failed for {}: {}",
+                                package_clone.identifier(),
+                                e
+                            );
+                        }
+                        _ => {
+                            warn!("OSV query failed for {}: {}", package_clone.identifier(), e);
+                        }
+                    }
                     Ok((vec![], VulnerabilitySource::OSV))
                 }
             }
@@ -344,22 +355,32 @@ impl AggregatingVulnerabilityRepository {
             }
         });
 
-        // Query GHSA
-        let ghsa_client = self.ghsa_client.clone();
-        let package_clone = package.clone();
-        join_set.spawn(async move {
-            match ghsa_client.query_vulnerabilities(&package_clone).await {
-                Ok(raw_vulns) => Ok((raw_vulns, VulnerabilitySource::GHSA)),
-                Err(e) => {
-                    warn!(
-                        "GHSA query failed for {}: {}",
-                        package_clone.identifier(),
-                        e
-                    );
-                    Ok((vec![], VulnerabilitySource::GHSA))
+        // Query GHSA (optional - only when token configured)
+        if std::env::var("VULNERA__APIS__GHSA__TOKEN")
+            .map(|v| !v.is_empty())
+            .unwrap_or(false)
+        {
+            let ghsa_client = self.ghsa_client.clone();
+            let package_clone = package.clone();
+            join_set.spawn(async move {
+                match ghsa_client.query_vulnerabilities(&package_clone).await {
+                    Ok(raw_vulns) => Ok((raw_vulns, VulnerabilitySource::GHSA)),
+                    Err(e) => {
+                        warn!(
+                            "GHSA query failed for {}: {}",
+                            package_clone.identifier(),
+                            e
+                        );
+                        Ok((vec![], VulnerabilitySource::GHSA))
+                    }
                 }
-            }
-        });
+            });
+        } else {
+            debug!(
+                "Skipping GHSA query for {}: no GHSA token configured",
+                package.identifier()
+            );
+        }
 
         // Collect results
         let mut all_vulnerabilities = Vec::new();
@@ -435,10 +456,20 @@ impl AggregatingVulnerabilityRepository {
             match osv_client.get_vulnerability_details(&id_str).await {
                 Ok(raw_vuln_opt) => Ok((raw_vuln_opt, VulnerabilitySource::OSV)),
                 Err(e) => {
-                    warn!(
-                        "OSV vulnerability details query failed for {}: {}",
-                        id_str, e
-                    );
+                    match e {
+                        VulnerabilityError::Json(_) => {
+                            debug!(
+                                "OSV vulnerability details JSON decode failed for {}: {}",
+                                id_str, e
+                            );
+                        }
+                        _ => {
+                            warn!(
+                                "OSV vulnerability details query failed for {}: {}",
+                                id_str, e
+                            );
+                        }
+                    }
                     Ok((None, VulnerabilitySource::OSV))
                 }
             }
@@ -460,21 +491,31 @@ impl AggregatingVulnerabilityRepository {
             }
         });
 
-        // Query GHSA
-        let ghsa_client = self.ghsa_client.clone();
-        let id_str = id.as_str().to_string();
-        join_set.spawn(async move {
-            match ghsa_client.get_vulnerability_details(&id_str).await {
-                Ok(raw_vuln_opt) => Ok((raw_vuln_opt, VulnerabilitySource::GHSA)),
-                Err(e) => {
-                    warn!(
-                        "GHSA vulnerability details query failed for {}: {}",
-                        id_str, e
-                    );
-                    Ok((None, VulnerabilitySource::GHSA))
+        // Query GHSA (optional - only when token configured)
+        if std::env::var("VULNERA__APIS__GHSA__TOKEN")
+            .map(|v| !v.is_empty())
+            .unwrap_or(false)
+        {
+            let ghsa_client = self.ghsa_client.clone();
+            let id_str = id.as_str().to_string();
+            join_set.spawn(async move {
+                match ghsa_client.get_vulnerability_details(&id_str).await {
+                    Ok(raw_vuln_opt) => Ok((raw_vuln_opt, VulnerabilitySource::GHSA)),
+                    Err(e) => {
+                        warn!(
+                            "GHSA vulnerability details query failed for {}: {}",
+                            id_str, e
+                        );
+                        Ok((None, VulnerabilitySource::GHSA))
+                    }
                 }
-            }
-        });
+            });
+        } else {
+            debug!(
+                "Skipping GHSA vulnerability details query for {}: no GHSA token configured",
+                id.as_str()
+            );
+        }
 
         // Collect results from all sources
         let mut vulnerabilities = Vec::new();
