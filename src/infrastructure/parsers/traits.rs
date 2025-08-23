@@ -31,78 +31,30 @@ pub struct ParserFactory {
 impl ParserFactory {
     /// Create a new parser factory with all available parsers
     pub fn new() -> Self {
-        let mut parsers: Vec<Box<dyn PackageFileParser>> = Vec::new();
-
-        // Add all parser implementations
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::npm::NpmParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::npm::PackageLockParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::yarn_pest::YarnPestParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::npm::YarnLockParser::new(),
-        ));
-
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::python::RequirementsTxtParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::python::PipfileParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::python::PyProjectTomlParser::new(),
-        ));
-
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::java::MavenParser::new(),
-        ));
-        // Pest-based Gradle parser
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::gradle_pest::GradlePestParser::new(),
-        ));
-        // Legacy Gradle parser as fallback "deprecated once pest tested enough"
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::java::GradleParser::new(),
-        ));
-
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::rust::CargoParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::rust::CargoLockParser::new(),
-        ));
-
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::go::GoModParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::go::GoSumParser::new(),
-        ));
-
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::php::ComposerParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::php::ComposerLockParser::new(),
-        ));
-
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::nuget::NuGetPackagesConfigParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::nuget::NuGetProjectXmlParser::new(),
-        ));
-
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::ruby::GemfileLockParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::ruby::GemfileParser::new(),
-        ));
+        let parsers: Vec<Box<dyn PackageFileParser>> = vec![
+            Box::new(crate::infrastructure::parsers::npm::NpmParser::new()),
+            Box::new(crate::infrastructure::parsers::npm::PackageLockParser::new()),
+            Box::new(crate::infrastructure::parsers::yarn_pest::YarnPestParser::new()),
+            Box::new(crate::infrastructure::parsers::npm::YarnLockParser::new()),
+            Box::new(crate::infrastructure::parsers::python::RequirementsTxtParser::new()),
+            Box::new(crate::infrastructure::parsers::python::PipfileParser::new()),
+            Box::new(crate::infrastructure::parsers::python::PyProjectTomlParser::new()),
+            Box::new(crate::infrastructure::parsers::java::MavenParser::new()),
+            // Pest-based Gradle parser
+            Box::new(crate::infrastructure::parsers::gradle_pest::GradlePestParser::new()),
+            // Legacy Gradle parser as fallback "deprecated once pest tested enough"
+            Box::new(crate::infrastructure::parsers::java::GradleParser::new()),
+            Box::new(crate::infrastructure::parsers::rust::CargoParser::new()),
+            Box::new(crate::infrastructure::parsers::rust::CargoLockParser::new()),
+            Box::new(crate::infrastructure::parsers::go::GoModParser::new()),
+            Box::new(crate::infrastructure::parsers::go::GoSumParser::new()),
+            Box::new(crate::infrastructure::parsers::php::ComposerParser::new()),
+            Box::new(crate::infrastructure::parsers::php::ComposerLockParser::new()),
+            Box::new(crate::infrastructure::parsers::nuget::NuGetPackagesConfigParser::new()),
+            Box::new(crate::infrastructure::parsers::nuget::NuGetProjectXmlParser::new()),
+            Box::new(crate::infrastructure::parsers::ruby::GemfileLockParser::new()),
+            Box::new(crate::infrastructure::parsers::ruby::GemfileParser::new()),
+        ];
 
         Self { parsers }
     }
@@ -122,7 +74,7 @@ impl ParserFactory {
         }
 
         // Sort by priority (highest first)
-        supporting_parsers.sort_by(|a, b| b.priority().cmp(&a.priority()));
+        supporting_parsers.sort_by_key(|p| std::cmp::Reverse(p.priority()));
 
         // Return the highest priority parser
         supporting_parsers.into_iter().next()

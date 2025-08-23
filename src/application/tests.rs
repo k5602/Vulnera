@@ -612,7 +612,7 @@ async fn test_application_error_display() {
     assert!(app_error.to_string().contains("Domain error"));
 
     let parse_error = ApplicationError::Parse(crate::application::ParseError::Json(
-        serde_json::Error::from(serde_json::from_str::<serde_json::Value>("invalid").unwrap_err()),
+        serde_json::from_str::<serde_json::Value>("invalid").unwrap_err(),
     ));
     assert!(parse_error.to_string().contains("Parsing error"));
 
@@ -917,7 +917,7 @@ async fn test_version_resolution_normal_path() {
             ecosystem.clone(),
             name,
             Some(current.clone()),
-            &[vuln.clone()],
+            std::slice::from_ref(&vuln),
         )
         .await
         .expect("recommend ok");
@@ -1166,7 +1166,7 @@ async fn test_version_resolution_nuget_four_segment() {
             ecosystem.clone(),
             name,
             Some(current.clone()),
-            &[vuln.clone()],
+            std::slice::from_ref(&vuln),
         )
         .await
         .expect("recommend ok");

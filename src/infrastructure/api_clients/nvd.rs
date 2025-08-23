@@ -571,7 +571,6 @@ impl VulnerabilityApiClient for NvdClient {
             })
         })?;
 
-        // removed unused cvss_index preload
         // Convert CVEs to raw vulns
         let mut res: Vec<RawVulnerability> = cves
             .into_iter()

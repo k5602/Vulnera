@@ -65,7 +65,7 @@ impl IntoResponse for ApplicationError {
                 if sanitize_errors {
                     "An internal error occurred"
                 } else {
-                    "An internal error occurred"
+                    "Internal server error"
                 },
             ),
         };

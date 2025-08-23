@@ -800,7 +800,7 @@ mod tests {
         assert!(result.is_ok());
         let connection = result.unwrap();
         assert_eq!(connection.nodes.len(), 0);
-        assert_eq!(connection.page_info.has_next_page, false);
+        assert!(!connection.page_info.has_next_page);
     }
 
     #[tokio::test]

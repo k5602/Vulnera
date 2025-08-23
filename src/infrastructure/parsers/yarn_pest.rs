@@ -51,7 +51,7 @@ impl YarnPestParser {
     /// - "lodash@^4.17.21"
     /// - lodash@~4.17.20
     /// - "@babel/core@^7.23.0"
-    /// Return the inferred package name:
+    ///   Return the inferred package name:
     /// - lodash
     /// - lodash
     /// - @babel/core

@@ -171,7 +171,7 @@ impl PipfileParser {
                 };
 
                 // Clean version string
-                let clean_version = self.clean_pipfile_version(&version_str)?;
+                let clean_version = Self::clean_pipfile_version(&version_str)?;
 
                 let version = Version::parse(&clean_version).map_err(|_| ParseError::Version {
                     version: version_str.clone(),
@@ -188,7 +188,7 @@ impl PipfileParser {
     }
 
     /// Clean Pipfile version specifier
-    fn clean_pipfile_version(&self, version_str: &str) -> Result<String, ParseError> {
+    fn clean_pipfile_version(version_str: &str) -> Result<String, ParseError> {
         let version_str = version_str.trim();
 
         if version_str.is_empty() || version_str == "*" || version_str == "latest" {
@@ -200,23 +200,19 @@ impl PipfileParser {
             // Extract the first version from a range
             let parts: Vec<&str> = version_str.split(',').collect();
             if let Some(first_part) = parts.first() {
-                return self.clean_pipfile_version(first_part);
+                return Self::clean_pipfile_version(first_part);
             }
         }
 
         // Remove common prefixes
-        let cleaned = if version_str.starts_with("==") {
-            &version_str[2..]
-        } else if version_str.starts_with(">=")
-            || version_str.starts_with("<=")
-            || version_str.starts_with("~=")
-        {
-            &version_str[2..]
-        } else if version_str.starts_with('>') || version_str.starts_with('<') {
-            &version_str[1..]
-        } else {
-            version_str
-        };
+        let cleaned = version_str
+            .strip_prefix("==")
+            .or_else(|| version_str.strip_prefix(">="))
+            .or_else(|| version_str.strip_prefix("<="))
+            .or_else(|| version_str.strip_prefix("~="))
+            .or_else(|| version_str.strip_prefix('>'))
+            .or_else(|| version_str.strip_prefix('<'))
+            .unwrap_or(version_str);
 
         let cleaned = cleaned.trim();
 

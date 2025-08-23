@@ -48,7 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let parser_factory = Arc::new(ParserFactory::new());
 
     // Create API clients
-    let osv_client = Arc::new(OsvClient::default());
+    let osv_client = Arc::new(OsvClient);
     let nvd_client = Arc::new(NvdClient::new(
         config.apis.nvd.base_url.clone(),
         config.apis.nvd.api_key.clone(),

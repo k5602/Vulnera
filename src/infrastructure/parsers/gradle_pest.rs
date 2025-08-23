@@ -481,7 +481,6 @@ dependencies {
             .iter()
             .find(|p| p.name == "com.google.guava:guava")
             .unwrap();
-        // -jre suffix removed
         assert_eq!(guava.version, Version::parse("31.1").unwrap());
     }
 

@@ -691,7 +691,7 @@ mod tests {
 
     fn create_test_repo() -> AggregatingVulnerabilityRepository {
         // Create mock clients for testing
-        let osv_client = Arc::new(OsvClient::default());
+        let osv_client = Arc::new(OsvClient);
         let nvd_client = Arc::new(NvdClient::new(
             "https://services.nvd.nist.gov".to_string(),
             None,

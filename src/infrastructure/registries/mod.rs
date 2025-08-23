@@ -548,7 +548,6 @@ impl PackageRegistryClient for GoProxyRegistryClient {
 }
 
 /// Maven Central client (https://repo1.maven.org/maven2/{groupPath}/{artifact}/maven-metadata.xml)
-/// Expects name in the form "group:artifact"
 pub struct MavenCentralRegistryClient;
 
 #[async_trait]
@@ -594,7 +593,6 @@ impl PackageRegistryClient for MavenCentralRegistryClient {
 
         let mut out: Vec<VersionInfo> = Vec::new();
         let mut reader = quick_xml::Reader::from_str(&xml);
-        // removed: quick-xml Reader::trim_text is not available; rely on default decoder behavior
         let mut buf = Vec::new();
         let mut in_version_tag = false;
 
@@ -630,7 +628,7 @@ impl PackageRegistryClient for MavenCentralRegistryClient {
                     }
                 }
                 Ok(quick_xml::events::Event::Eof) => break,
-                Err(_e) => break, // best-effort
+                Err(_e) => break,
                 _ => {}
             }
             buf.clear();
@@ -668,6 +666,12 @@ impl MultiplexRegistryClient {
     }
 }
 
+impl Default for MultiplexRegistryClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl PackageRegistryClient for MultiplexRegistryClient {
     async fn list_versions(
@@ -684,7 +688,6 @@ impl PackageRegistryClient for MultiplexRegistryClient {
             Ecosystem::Packagist => self.packagist.list_versions(ecosystem, name).await,
             Ecosystem::Go => self.goproxy.list_versions(ecosystem, name).await,
             Ecosystem::Maven => self.maven_central.list_versions(ecosystem, name).await,
-            other => Err(RegistryError::UnsupportedEcosystem(other)),
         }
     }
 }

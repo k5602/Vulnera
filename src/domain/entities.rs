@@ -69,6 +69,7 @@ pub struct Vulnerability {
 
 impl Vulnerability {
     /// Create a new vulnerability with validation
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: VulnerabilityId,
         summary: String,

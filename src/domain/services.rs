@@ -453,7 +453,7 @@ mod tests {
 
         assert_eq!(grouped.get(&Severity::Critical).unwrap().len(), 2);
         assert_eq!(grouped.get(&Severity::High).unwrap().len(), 1);
-        assert!(grouped.get(&Severity::Medium).is_none());
+        assert!(!grouped.contains_key(&Severity::Medium));
     }
 
     #[test]
@@ -545,8 +545,8 @@ mod tests {
 
     #[test]
     fn test_default_implementations() {
-        let _matcher = VulnerabilityMatcher::default();
-        let _comparator = VersionComparator::default();
-        let _aggregator = ReportAggregator::default();
+        let _matcher = VulnerabilityMatcher::new();
+        let _comparator = VersionComparator::new();
+        let _aggregator = ReportAggregator::new();
     }
 }

@@ -175,9 +175,8 @@ impl ComposerLockParser {
                             field: "package version".to_string(),
                         })?;
 
-                    // Clean version string (remove 'v' prefix if present)
-                    let clean_version = if version_str.starts_with('v') {
-                        &version_str[1..]
+                    let clean_version = if let Some(stripped) = version_str.strip_prefix('v') {
+                        stripped
                     } else {
                         version_str
                     };

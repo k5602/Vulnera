@@ -57,8 +57,8 @@ impl GoModParser {
         let line = line.trim();
 
         // Remove "require " prefix if present
-        let line = if line.starts_with("require ") {
-            &line[8..]
+        let line = if let Some(stripped) = line.strip_prefix("require ") {
+            stripped
         } else {
             line
         };
@@ -99,8 +99,8 @@ impl GoModParser {
         }
 
         // Remove 'v' prefix if present
-        let cleaned = if version_str.starts_with('v') {
-            &version_str[1..]
+        let cleaned = if let Some(stripped) = version_str.strip_prefix('v') {
+            stripped
         } else {
             version_str
         };
@@ -115,8 +115,8 @@ impl GoModParser {
         }
 
         // Handle +incompatible suffix
-        let cleaned = if cleaned.ends_with("+incompatible") {
-            &cleaned[..cleaned.len() - 13]
+        let cleaned = if let Some(stripped) = cleaned.strip_suffix("+incompatible") {
+            stripped
         } else {
             cleaned
         };
@@ -215,8 +215,8 @@ impl GoSumParser {
         }
 
         // Remove 'v' prefix if present
-        let cleaned = if version_str.starts_with('v') {
-            &version_str[1..]
+        let cleaned = if let Some(stripped) = version_str.strip_prefix('v') {
+            stripped
         } else {
             version_str
         };
@@ -230,8 +230,8 @@ impl GoSumParser {
         }
 
         // Handle +incompatible suffix
-        let cleaned = if cleaned.ends_with("+incompatible") {
-            &cleaned[..cleaned.len() - 13]
+        let cleaned = if let Some(stripped) = cleaned.strip_suffix("+incompatible") {
+            stripped
         } else {
             cleaned
         };
