@@ -436,7 +436,9 @@ async fn test_analysis_service_successful_analysis() {
     );
     let vuln_repo = Arc::new(MockVulnerabilityRepository::new(vec![test_vuln]));
 
-    let analysis_service = AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service);
+    let config = crate::config::Config::default();
+    let analysis_service =
+        AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service, &config);
 
     // Test with a simple package.json
     let package_json = r#"{"dependencies": {"express": "4.17.1"}}"#;
@@ -469,7 +471,9 @@ async fn test_analysis_service_get_vulnerability_details() {
     );
     let vuln_repo = Arc::new(MockVulnerabilityRepository::new(vec![test_vuln.clone()]));
 
-    let analysis_service = AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service);
+    let config = crate::config::Config::default();
+    let analysis_service =
+        AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service, &config);
 
     let vuln_id = VulnerabilityId::new("CVE-2022-24999".to_string()).unwrap();
     let result = analysis_service.get_vulnerability_details(&vuln_id).await;
@@ -491,7 +495,9 @@ async fn test_analysis_service_vulnerability_not_found() {
     let parser_factory = Arc::new(ParserFactory::new());
     let vuln_repo = Arc::new(MockVulnerabilityRepository::new(vec![]));
 
-    let analysis_service = AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service);
+    let config = crate::config::Config::default();
+    let analysis_service =
+        AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service, &config);
 
     let vuln_id = VulnerabilityId::new("CVE-2022-99999".to_string()).unwrap();
     let result = analysis_service.get_vulnerability_details(&vuln_id).await;
@@ -517,7 +523,9 @@ async fn test_analysis_service_repository_failure() {
     let parser_factory = Arc::new(ParserFactory::new());
     let vuln_repo = Arc::new(MockVulnerabilityRepository::with_failure());
 
-    let analysis_service = AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service);
+    let config = crate::config::Config::default();
+    let analysis_service =
+        AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service, &config);
 
     let package_json = r#"{"dependencies": {"express": "4.17.1"}}"#;
     let result = analysis_service
@@ -542,7 +550,9 @@ async fn test_analysis_service_invalid_file_format() {
     let parser_factory = Arc::new(ParserFactory::new());
     let vuln_repo = Arc::new(MockVulnerabilityRepository::new(vec![]));
 
-    let analysis_service = AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service);
+    let config = crate::config::Config::default();
+    let analysis_service =
+        AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service, &config);
 
     let invalid_json = r#"{"invalid": json"#;
     let result = analysis_service
@@ -575,8 +585,9 @@ async fn test_analysis_service_caching_behavior() {
     );
     let vuln_repo = Arc::new(MockVulnerabilityRepository::new(vec![test_vuln]));
 
+    let config = crate::config::Config::default();
     let analysis_service =
-        AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service.clone());
+        AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service.clone(), &config);
 
     let package_json = r#"{"dependencies": {"express": "4.17.1"}}"#;
 
@@ -666,6 +677,84 @@ async fn test_analysis_service_with_custom_concurrency() {
 }
 
 #[tokio::test]
+async fn test_concurrent_package_processing() {
+    let temp_dir = TempDir::new().unwrap();
+    let cache_repo = Arc::new(FileCacheRepository::new(
+        temp_dir.path().to_path_buf(),
+        Duration::from_secs(3600),
+    ));
+    let cache_service = Arc::new(CacheServiceImpl::new(cache_repo));
+    let parser_factory = Arc::new(ParserFactory::new());
+
+    // Create mock vulnerabilities for testing
+    let test_package = create_test_package("express", "4.17.1", Ecosystem::Npm);
+    let mock_vulns = vec![
+        create_test_vulnerability("CVE-2021-1001", Severity::High, test_package.clone()),
+        create_test_vulnerability("CVE-2021-1002", Severity::Medium, test_package),
+    ];
+    let vuln_repo = Arc::new(MockVulnerabilityRepository::new(mock_vulns));
+
+    let analysis_service = AnalysisServiceImpl::with_concurrency(
+        parser_factory,
+        vuln_repo,
+        cache_service,
+        2, // Process 2 packages concurrently
+    );
+
+    // Package.json with multiple dependencies to test concurrent processing
+    let package_json = r#"{
+        "dependencies": {
+            "express": "4.17.1",
+            "lodash": "4.17.20",
+            "axios": "0.21.1",
+            "moment": "2.29.1",
+            "react": "17.0.2"
+        }
+    }"#;
+
+    let result = analysis_service
+        .analyze_dependencies(package_json, Ecosystem::Npm)
+        .await;
+
+    assert!(result.is_ok());
+    let report = result.unwrap();
+    assert_eq!(report.metadata.total_packages, 5);
+    // Should find vulnerabilities for all packages since our mock returns them
+    assert!(report.metadata.total_vulnerabilities > 0);
+}
+
+#[tokio::test]
+async fn test_analysis_service_config_from_env() {
+    // Set environment variable for max concurrent packages
+    unsafe {
+        std::env::set_var("VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES", "5");
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let cache_repo = Arc::new(FileCacheRepository::new(
+        temp_dir.path().to_path_buf(),
+        Duration::from_secs(3600),
+    ));
+    let cache_service = Arc::new(CacheServiceImpl::new(cache_repo));
+    let parser_factory = Arc::new(ParserFactory::new());
+    let vuln_repo = Arc::new(MockVulnerabilityRepository::new(vec![]));
+
+    // Load config which should pick up the env var
+    let config = crate::config::Config::load().unwrap_or_else(|_| crate::config::Config::default());
+
+    let analysis_service =
+        AnalysisServiceImpl::new(parser_factory, vuln_repo, cache_service, &config);
+
+    // Verify the service picked up the configured value
+    assert_eq!(analysis_service.max_concurrent_requests(), 5);
+
+    // Clean up environment variable
+    unsafe {
+        std::env::remove_var("VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES");
+    }
+}
+
+#[tokio::test]
 async fn test_cache_service_cleanup() {
     let temp_dir = TempDir::new().unwrap();
     let cache_repo = Arc::new(FileCacheRepository::new(
@@ -707,7 +796,13 @@ async fn test_analyze_dependencies_use_case() {
     let cache = Arc::new(CacheServiceImpl::new(cache_repo));
     let parser_factory = Arc::new(ParserFactory::new());
 
-    let analysis_service = Arc::new(AnalysisServiceImpl::new(parser_factory, repo, cache));
+    let config = crate::config::Config::default();
+    let analysis_service = Arc::new(AnalysisServiceImpl::new(
+        parser_factory,
+        repo,
+        cache,
+        &config,
+    ));
 
     let use_case = AnalyzeDependencies::new(analysis_service);
 
@@ -736,7 +831,13 @@ async fn test_get_vulnerability_details_use_case() {
     let cache = Arc::new(CacheServiceImpl::new(cache_repo));
     let parser_factory = Arc::new(ParserFactory::new());
 
-    let analysis_service = Arc::new(AnalysisServiceImpl::new(parser_factory, repo, cache));
+    let config = crate::config::Config::default();
+    let analysis_service = Arc::new(AnalysisServiceImpl::new(
+        parser_factory,
+        repo,
+        cache,
+        &config,
+    ));
 
     let use_case = GetVulnerabilityDetails::new(analysis_service);
 
@@ -812,7 +913,13 @@ async fn test_analyze_dependencies_use_case_error_handling() {
     let cache = Arc::new(CacheServiceImpl::new(cache_repo));
     let parser_factory = Arc::new(ParserFactory::new());
 
-    let analysis_service = Arc::new(AnalysisServiceImpl::new(parser_factory, repo, cache));
+    let config = crate::config::Config::default();
+    let analysis_service = Arc::new(AnalysisServiceImpl::new(
+        parser_factory,
+        repo,
+        cache,
+        &config,
+    ));
 
     let use_case = AnalyzeDependencies::new(analysis_service);
 

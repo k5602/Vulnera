@@ -5,17 +5,21 @@ use std::path::PathBuf;
 
 /// Application configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     pub server: ServerConfig,
     pub cache: CacheConfig,
     pub apis: ApiConfig,
     pub logging: LoggingConfig,
     pub recommendations: RecommendationsConfig,
+    pub analysis: AnalysisConfig,
     pub popular_packages: Option<PopularPackagesConfig>,
 }
 
 /// Popular packages configuration for vulnerability listing
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+#[derive(Default)]
 pub struct PopularPackagesConfig {
     pub cache_ttl_hours: Option<u64>,
     pub npm: Option<Vec<PackageConfig>>,
@@ -35,6 +39,7 @@ pub struct PackageConfig {
 
 /// Server configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
@@ -45,12 +50,28 @@ pub struct ServerConfig {
     pub request_timeout_seconds: u64,
     /// Allowed CORS origins. Use ["*"] to allow any (development only). Empty vector -> no external origins.
     pub allowed_origins: Vec<String>,
+
     /// Security configuration
     pub security: SecurityConfig,
 }
 
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            host: "0.0.0.0".to_string(),
+            port: 3000,
+            workers: None,
+            enable_docs: true,
+            request_timeout_seconds: 30,
+            allowed_origins: vec!["*".to_string()],
+            security: SecurityConfig::default(),
+        }
+    }
+}
+
 /// Security configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SecurityConfig {
     /// Whether to enforce HTTPS redirects (redirect HTTP to HTTPS)
     pub enforce_https: bool,
@@ -64,15 +85,39 @@ pub struct SecurityConfig {
     pub hsts_include_subdomains: bool,
 }
 
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            enforce_https: false,
+            enable_security_headers: true,
+            sanitize_errors: false,
+            hsts_max_age: 31_536_000,
+            hsts_include_subdomains: true,
+        }
+    }
+}
+
 /// Cache configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CacheConfig {
     pub directory: PathBuf,
     pub ttl_hours: u64,
 }
 
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            directory: PathBuf::from(".vulnera_cache"),
+            ttl_hours: 24,
+        }
+    }
+}
+
 /// External API configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+#[derive(Default)]
 pub struct ApiConfig {
     pub nvd: NvdConfig,
     pub ghsa: GhsaConfig,
@@ -81,6 +126,7 @@ pub struct ApiConfig {
 
 /// NVD API configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct NvdConfig {
     pub base_url: String,
     pub api_key: Option<String>,
@@ -88,16 +134,39 @@ pub struct NvdConfig {
     pub rate_limit_per_30s: u32,
 }
 
+impl Default for NvdConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "https://services.nvd.nist.gov/rest/json".to_string(),
+            api_key: None,
+            timeout_seconds: 30,
+            rate_limit_per_30s: 5,
+        }
+    }
+}
+
 /// GitHub Security Advisories configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GhsaConfig {
     pub graphql_url: String,
     pub token: Option<String>,
     pub timeout_seconds: u64,
 }
 
+impl Default for GhsaConfig {
+    fn default() -> Self {
+        Self {
+            graphql_url: "https://api.github.com/graphql".to_string(),
+            token: None,
+            timeout_seconds: 30,
+        }
+    }
+}
+
 /// GitHub repository analysis configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GitHubConfig {
     pub base_url: String,
     pub token: Option<String>,
@@ -112,17 +181,69 @@ pub struct GitHubConfig {
     pub backoff_jitter: bool,
 }
 
+impl Default for GitHubConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "https://api.github.com".to_string(),
+            token: None,
+            reuse_ghsa_token: true,
+            timeout_seconds: 30,
+            max_concurrent_file_fetches: 8,
+            max_files_scanned: 200,
+            max_total_bytes: 2_000_000,
+            max_single_file_bytes: 1_000_000,
+            backoff_initial_ms: 500,
+            backoff_max_retries: 3,
+            backoff_jitter: true,
+        }
+    }
+}
+
 /// Logging configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct LoggingConfig {
     pub level: String,
     pub format: String,
 }
 
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            level: "info".to_string(),
+            format: "json".to_string(),
+        }
+    }
+}
+
 /// Recommendations configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RecommendationsConfig {
     pub max_version_queries_per_request: usize,
+}
+
+impl Default for RecommendationsConfig {
+    fn default() -> Self {
+        Self {
+            max_version_queries_per_request: 50,
+        }
+    }
+}
+
+/// Analysis configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AnalysisConfig {
+    pub max_concurrent_packages: usize,
+}
+
+impl Default for AnalysisConfig {
+    fn default() -> Self {
+        Self {
+            max_concurrent_packages: 3,
+        }
+    }
 }
 
 impl Default for Config {
@@ -179,6 +300,9 @@ impl Default for Config {
             },
             recommendations: RecommendationsConfig {
                 max_version_queries_per_request: 50,
+            },
+            analysis: AnalysisConfig {
+                max_concurrent_packages: 3,
             },
             popular_packages: None,
         }

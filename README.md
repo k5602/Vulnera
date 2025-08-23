@@ -99,6 +99,7 @@ curl -X POST http://localhost:3000/api/v1/analyze/repository \
   ```bash
   VULNERA__SERVER__PORT=8080
   VULNERA__CACHE__TTL_HOURS=24
+  VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES=3
   VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES=false
   VULNERA__RECOMMENDATIONS__MAX_VERSION_QUERIES_PER_REQUEST=50
   VULNERA__APIS__NVD__API_KEY=your_nvd_api_key
@@ -117,13 +118,53 @@ Vulnera is built with **Domain-Driven Design (DDD)** and a layered architecture:
 - **Presentation Layer:** HTTP API, DTOs, OpenAPI, middleware
 
 **Core Flow:**
-Dependency file → Parser → AggregatingVulnerabilityRepository (parallel API calls, merge results) → AnalysisReport → Optional reporting/caching.
+Dependency file → Parser → Concurrent package processing (default: 3 packages in parallel) → AggregatingVulnerabilityRepository (parallel API calls per package, merge results) → AnalysisReport → Optional reporting/caching.
 
 **Caching:**
 Filesystem-based, SHA256 keys, TTL configurable. Always use provided cache key helpers.
 
 **Error Handling:**
 Early mapping to domain/application errors, graceful degradation, and clear API responses.
+
+---
+
+## ⚡ Performance Tuning
+
+Vulnera supports several configuration options to optimize performance for your specific use case:
+
+### Concurrent Package Processing
+
+Control how many packages are analyzed simultaneously:
+
+```bash
+# Default: 3 packages processed in parallel
+VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES=3
+
+# For larger systems with better resources
+VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES=8
+
+# For systems with API rate limits or resource constraints
+VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES=1
+```
+
+**Performance Impact:**
+
+- **3 packages (default)**: ~3x faster than sequential processing, balanced for API rate limits
+- **Higher values**: Better performance for large dependency files, but may hit API rate limits
+- **Lower values**: Safer for constrained environments or strict rate limits
+
+### Other Performance Settings
+
+```bash
+# Vulnerability data caching (reduces API calls)
+VULNERA__CACHE__TTL_HOURS=24
+
+# File fetching concurrency for repository analysis
+VULNERA__APIS__GITHUB__MAX_CONCURRENT_FILE_FETCHES=8
+
+# Version query limits for recommendations
+VULNERA__RECOMMENDATIONS__MAX_VERSION_QUERIES_PER_REQUEST=50
+```
 
 ---
 

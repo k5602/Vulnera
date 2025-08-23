@@ -1578,22 +1578,22 @@ pub struct AnalysisServiceImpl<C: CacheService> {
     parser_factory: Arc<crate::infrastructure::parsers::ParserFactory>,
     vulnerability_repository: Arc<dyn VulnerabilityRepository>,
     cache_service: Arc<C>,
-    #[allow(dead_code)]
-    max_concurrent_requests: usize, // Reserved for future concurrency control
+    max_concurrent_requests: usize, // Maximum number of packages to process concurrently
 }
 
-impl<C: CacheService> AnalysisServiceImpl<C> {
-    /// Create a new analysis service implementation
+impl<C: CacheService + 'static> AnalysisServiceImpl<C> {
+    /// Create a new analysis service implementation with configuration
     pub fn new(
         parser_factory: Arc<crate::infrastructure::parsers::ParserFactory>,
         vulnerability_repository: Arc<dyn VulnerabilityRepository>,
         cache_service: Arc<C>,
+        config: &crate::config::Config,
     ) -> Self {
         Self {
             parser_factory,
             vulnerability_repository,
             cache_service,
-            max_concurrent_requests: 10, // Default to 10 concurrent requests
+            max_concurrent_requests: config.analysis.max_concurrent_packages,
         }
     }
 
@@ -1610,6 +1610,12 @@ impl<C: CacheService> AnalysisServiceImpl<C> {
             cache_service,
             max_concurrent_requests,
         }
+    }
+
+    /// Get the current max concurrent requests setting (for testing)
+    #[cfg(test)]
+    pub fn max_concurrent_requests(&self) -> usize {
+        self.max_concurrent_requests
     }
 
     /// Parse dependency file content into packages
@@ -1661,89 +1667,101 @@ impl<C: CacheService> AnalysisServiceImpl<C> {
         })
     }
 
-    /// Generate cache key for vulnerability lookup
-    fn vulnerability_cache_key(&self, package: &Package) -> String {
-        format!(
-            "vuln:{}:{}:{}",
-            package.ecosystem.canonical_name(),
-            package.name,
-            package.version
-        )
-    }
-
-    /// Look up vulnerabilities for a single package with caching
-    async fn lookup_vulnerabilities_for_package(
-        &self,
-        package: &Package,
-    ) -> Result<Vec<Vulnerability>, ApplicationError> {
-        let cache_key = self.vulnerability_cache_key(package);
-
-        // Try to get from cache first
-        if let Some(cached_vulnerabilities) = self
-            .cache_service
-            .get::<Vec<Vulnerability>>(&cache_key)
-            .await?
-        {
-            debug!("Cache hit for package: {}", package.identifier());
-            return Ok(cached_vulnerabilities);
-        }
-
-        debug!(
-            "Cache miss for package: {}, querying repository",
-            package.identifier()
-        );
-
-        // Query the repository
-        let vulnerabilities = self
-            .vulnerability_repository
-            .find_vulnerabilities(package)
-            .await
-            .map_err(ApplicationError::Vulnerability)?;
-
-        // Cache the result for 24 hours
-        let cache_ttl = Duration::from_secs(24 * 60 * 60);
-        if let Err(e) = self
-            .cache_service
-            .set(&cache_key, &vulnerabilities, cache_ttl)
-            .await
-        {
-            warn!(
-                "Failed to cache vulnerabilities for {}: {}",
-                package.identifier(),
-                e
-            );
-        }
-
-        Ok(vulnerabilities)
-    }
-
-    /// Process packages sequentially with proper error handling
-    async fn process_packages_sequentially(
+    /// Process packages concurrently with proper error handling and bounded concurrency
+    async fn process_packages_concurrently(
         &self,
         packages: Vec<Package>,
     ) -> Result<Vec<Vulnerability>, ApplicationError> {
         let mut all_vulnerabilities = Vec::new();
         let mut processed_count = 0;
+        let mut join_set: JoinSet<Result<(String, Vec<Vulnerability>), ApplicationError>> =
+            JoinSet::new();
 
-        for package in packages {
-            match self.lookup_vulnerabilities_for_package(&package).await {
-                Ok(vulnerabilities) => {
-                    processed_count += 1;
+        info!(
+            "Processing {} packages with max_concurrent_requests: {}",
+            packages.len(),
+            self.max_concurrent_requests
+        );
+
+        // Process packages in chunks to respect concurrency limits
+        for chunk in packages.chunks(self.max_concurrent_requests) {
+            // Spawn tasks for current chunk
+            for package in chunk {
+                let package_clone = package.clone();
+                let vuln_repo = self.vulnerability_repository.clone();
+                let cache_service = self.cache_service.clone();
+
+                join_set.spawn(async move {
+                    let package_id = package_clone.identifier();
+
+                    // Inline the vulnerability lookup logic
+                    let cache_key = format!(
+                        "vuln:{}:{}:{}",
+                        package_clone.ecosystem.canonical_name(),
+                        package_clone.name,
+                        package_clone.version
+                    );
+
+                    // Check cache first
+                    if let Ok(Some(cached_vulns)) =
+                        cache_service.get::<Vec<Vulnerability>>(&cache_key).await
+                    {
+                        debug!("Cache hit for package: {}", package_id);
+                        return Ok((package_id, cached_vulns));
+                    }
+
+                    // Cache miss - query repository
                     debug!(
-                        "Found {} vulnerabilities for package: {}",
-                        vulnerabilities.len(),
-                        package.identifier()
+                        "Cache miss for package: {}, querying repository",
+                        package_id
                     );
-                    all_vulnerabilities.extend(vulnerabilities);
-                }
-                Err(e) => {
-                    error!(
-                        "Failed to lookup vulnerabilities for package {}: {}",
-                        package.identifier(),
-                        e
-                    );
-                    // Continue processing other packages instead of failing completely
-                    processed_count += 1;
+
+                    match vuln_repo.find_vulnerabilities(&package_clone).await {
+                        Ok(vulnerabilities) => {
+                            // Cache the result for future use
+                            let cache_ttl = std::time::Duration::from_secs(24 * 3600); // 24 hours
+                            if let Err(e) = cache_service
+                                .set(&cache_key, &vulnerabilities, cache_ttl)
+                                .await
+                            {
+                                warn!("Failed to cache vulnerabilities for {}: {}", package_id, e);
+                            }
+
+                            debug!(
+                                "Found {} vulnerabilities for package: {}",
+                                vulnerabilities.len(),
+                                package_id
+                            );
+                            Ok((package_id, vulnerabilities))
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to lookup vulnerabilities for package {}: {}",
+                                package_id, e
+                            );
+                            // Continue processing other packages instead of failing completely
+                            Ok((package_id, vec![]))
+                        }
+                    }
+                });
+            }
+
+            // Collect results from current chunk
+            while let Some(result) = join_set.join_next().await {
+                match result {
+                    Ok(Ok((package_id, vulnerabilities))) => {
+                        processed_count += 1;
+                        debug!("Completed processing package: {}", package_id);
+                        all_vulnerabilities.extend(vulnerabilities);
+                    }
+                    Ok(Err(e)) => {
+                        error!("Package processing error: {}", e);
+                        processed_count += 1;
+                    }
+                    Err(e) => {
+                        error!("Join error: {}", e);
+                        processed_count += 1;
+                    }
                 }
             }
         }
@@ -1759,7 +1777,7 @@ impl<C: CacheService> AnalysisServiceImpl<C> {
 }
 
 #[async_trait]
-impl<C: CacheService> AnalysisService for AnalysisServiceImpl<C> {
+impl<C: CacheService + 'static> AnalysisService for AnalysisServiceImpl<C> {
     async fn analyze_dependencies(
         &self,
         file_content: &str,
@@ -1789,8 +1807,8 @@ impl<C: CacheService> AnalysisService for AnalysisServiceImpl<C> {
 
         info!("Parsed {} packages from dependency file", packages.len());
 
-        // Look up vulnerabilities for all packages sequentially
-        let vulnerabilities = self.process_packages_sequentially(packages.clone()).await?;
+        // Look up vulnerabilities for all packages concurrently
+        let vulnerabilities = self.process_packages_concurrently(packages.clone()).await?;
 
         let analysis_duration = start_time.elapsed();
         let sources_queried = {

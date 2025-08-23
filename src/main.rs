@@ -74,6 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         parser_factory.clone(),
         vulnerability_repository.clone(),
         cache_service.clone(),
+        &config,
     ));
     let report_service = Arc::new(ReportServiceImpl::new());
     // GitHub repository analysis components (stub wiring)
@@ -140,7 +141,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if config.server.enable_docs {
         tracing::info!("API documentation available at http://{}/docs", addr);
     } else {
-        tracing::info!("API documentation disabled (enable_docs=false)");
+        tracing::info!("API documentation disabled");
     }
 
     // Start server with graceful shutdown

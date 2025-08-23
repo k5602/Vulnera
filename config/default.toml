@@ -19,6 +19,9 @@ hsts_include_subdomains = true
 directory = ".vulnera_cache"
 ttl_hours = 24
 
+[analysis]
+max_concurrent_packages = 3
+
 
 
 [apis.nvd]

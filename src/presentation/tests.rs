@@ -56,10 +56,12 @@ fn dummy_state() -> AppState {
         mock_client,
     ));
 
+    let config = crate::config::Config::default();
     let analysis_service = Arc::new(AnalysisServiceImpl::new(
         parser_factory,
         vuln_repo.clone(),
         cache_service.clone(),
+        &config,
     ));
     let report_service = Arc::new(ReportServiceImpl::new());
 

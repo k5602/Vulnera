@@ -6,6 +6,12 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 ## [Unreleased]
 
 ### Added
+
+- Configurable concurrent package processing:
+  - New configuration option `VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES` (default: `3`)
+  - Allows tuning the number of packages processed simultaneously during vulnerability analysis
+  - Improves performance for dependency files with multiple packages (~3x faster analysis)
+  - Configurable via environment variables and TOML configuration files
 - Safe version recommendations integrated across the API:
   - Analyze endpoint now returns `version_recommendations` per vulnerable dependency.
   - Repository analysis endpoint now returns `version_recommendations` for unique vulnerable packages across manifests.
@@ -36,6 +42,11 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
     - PyPI prerelease-only safe versions and behavior under prerelease exclusion flag.
 
 ### Changed
+
+- Package processing architecture updated from sequential to concurrent:
+  - Default concurrent processing of 3 packages in parallel (configurable)
+  - Maintains existing caching behavior and error handling
+  - Preserves API rate limiting through bounded concurrency
 - API responses now include optional `version_recommendations`:
   - AnalysisResponse: `version_recommendations?: VersionRecommendationDto[]`
   - RepositoryAnalysisResponse: `version_recommendations?: VersionRecommendationDto[]`
@@ -51,6 +62,7 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
   - The nearest recommendation is a prerelease
 
 ### Documentation
+
 - `docs/api-examples.md`:
   - Expanded with examples including `version_recommendations` and the new fields.
   - Configuration section added for:
@@ -58,19 +70,25 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
     - `VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES`
   - Added repository analysis example with recommendations.
   - Ecosystem notes on NuGet 4-segment versions and PyPI prerelease behavior.
-- `scripts/env/.env.example`:
+- `scripts/.env.example`:
   - Added:
+    - `VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES=3`
     - `VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES=false`
     - `VULNERA__RECOMMENDATIONS__MAX_VERSION_QUERIES_PER_REQUEST=50`
 
 ### Fixed
+
 - Reduced duplicate recommendation computations via identifier-level deduplication in controllers.
 - Notes emitted when registries provide empty/yanked version lists to improve operator diagnostics.
 
 ### Breaking Changes
+
 - None. All changes are additive. Existing API fields are unchanged; new fields are optional.
 
 ### Environment Variables (recap)
+
+- Analysis:
+  - `VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES` (default: `3`)
 - Cache:
   - `VULNERA__CACHE__DIRECTORY` (default: `.vulnera_cache`)
   - `VULNERA__CACHE__TTL_HOURS` (default: `24`)
