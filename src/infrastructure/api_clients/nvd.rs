@@ -108,12 +108,13 @@ impl NvdClient {
         client.start_periodic_sync();
         client
     }
-
-    /// Construct with the official feeds base and default env-based cache directory
-    pub fn default() -> Self {
-        Self::new("https://nvd.nist.gov/feeds/json/cve/1.1".to_string(), None)
+}
+impl Default for NvdClient {
+    fn default() -> Self {
+        NvdClient::new("https://nvd.nist.gov/feeds/json/cve/1.1".to_string(), None)
     }
-
+}
+impl NvdClient {
     /// Compatibility constructor signature; api key unused in local-cache mode
     pub fn with_api_key(api_key: String) -> Self {
         Self::new(

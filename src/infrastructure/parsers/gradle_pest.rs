@@ -10,8 +10,7 @@ use super::traits::PackageFileParser;
 
 // Internal pest module to avoid exporting Rule and causing name conflicts
 mod pest_impl {
-    
-    
+
     use pest_derive::Parser;
 
     #[derive(Parser)]
@@ -37,9 +36,9 @@ impl GradlePestParser {
         if s.len() >= 2
             && ((s.starts_with('"') && s.ends_with('"'))
                 || (s.starts_with('\'') && s.ends_with('\'')))
-            {
-                return s[1..s.len() - 1].to_string();
-            }
+        {
+            return s[1..s.len() - 1].to_string();
+        }
         s.to_string()
     }
 

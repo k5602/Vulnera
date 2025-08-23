@@ -292,13 +292,13 @@ Phase 3: Pest Parsers (Priority Formats)
 - Validate against comprehensive fixtures.
 - and quick-xml for Maven (pom.xml) instead of regex.
 
-Phase 4: Cleanups & Docs
+Phase 4 : add ruby and c# parsers for ruby gems and .nuget and analyse how we grab fixed version and updated version algorithm and feedback overhaul
+
+Phase 5: Cleanups & Docs
 
 - Remove dead code from old manual OSV/NVD models.
 - Update docs and examples; add admin instructions for NVD dataset bootstrap/update.
 - Final regression and `make ci-check`.
-
-Phase 5 : fixed version and updated version algorithm and feedback overhaul
 
 Phase 6: Optional
 

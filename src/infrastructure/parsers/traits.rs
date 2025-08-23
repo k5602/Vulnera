@@ -90,6 +90,20 @@ impl ParserFactory {
             crate::infrastructure::parsers::php::ComposerLockParser::new(),
         ));
 
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::nuget::NuGetPackagesConfigParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::nuget::NuGetProjectXmlParser::new(),
+        ));
+
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::ruby::GemfileLockParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::ruby::GemfileParser::new(),
+        ));
+
         Self { parsers }
     }
 

@@ -8,15 +8,16 @@ use async_trait::async_trait;
 /// Client for the OSV (Open Source Vulnerability) API
 pub struct OsvClient;
 
+impl Default for OsvClient {
+    fn default() -> Self {
+        OsvClient::new("https://api.osv.dev".to_string())
+    }
+}
+
 impl OsvClient {
     /// Create a new OSV client with the given base URL
     pub fn new(_base_url: String) -> Self {
         Self
-    }
-
-    /// Create a new OSV client with default configuration
-    pub fn default() -> Self {
-        Self::new("https://api.osv.dev".to_string())
     }
 
     /// Convert domain ecosystem to OSV ecosystem enum

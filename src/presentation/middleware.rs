@@ -237,7 +237,9 @@ pub async fn ghsa_token_middleware(request: Request<axum::body::Body>, next: Nex
                         let s = s.trim();
                         if let Some(rest) = s.strip_prefix("token ") {
                             Some(rest.to_string())
-                        } else { s.strip_prefix("Bearer ").map(|rest| rest.to_string()) }
+                        } else {
+                            s.strip_prefix("Bearer ").map(|rest| rest.to_string())
+                        }
                     })
             })
     };

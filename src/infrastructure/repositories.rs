@@ -77,7 +77,15 @@ impl AggregatingVulnerabilityRepository {
                 "Go" | "go" => Ecosystem::Go,
                 "Maven" | "maven" => Ecosystem::Maven,
                 "Packagist" | "packagist" => Ecosystem::Packagist,
-                _ => continue, // Skip unknown ecosystems
+                "RubyGems" | "rubygems" => Ecosystem::RubyGems,
+                "NuGet" | "nuget" => Ecosystem::NuGet,
+                _ => {
+                    debug!(
+                        "Unknown ecosystem '{}', skipping affected entry",
+                        affected_data.package.ecosystem
+                    );
+                    continue;
+                }
             };
 
             // Parse affected versions and ranges
