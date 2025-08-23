@@ -1,4 +1,5 @@
 // Repository analysis service tests
+
 use super::{RepositoryAnalysisInput, RepositoryAnalysisService, RepositoryAnalysisServiceImpl};
 use crate::infrastructure::VulnerabilityRepository;
 use crate::infrastructure::parsers::ParserFactory;
@@ -11,7 +12,7 @@ use std::time::Duration;
 
 use crate::application::{
     AnalysisService, AnalysisServiceImpl, ApplicationError, CacheService, CacheServiceImpl,
-    ReportService, ReportServiceImpl, VulnerabilityError,
+    ReportService, ReportServiceImpl, VersionResolutionService, VulnerabilityError,
 };
 use crate::domain::{
     AffectedPackage, AnalysisReport, Ecosystem, Package, Severity, Version, VersionRange,
@@ -820,4 +821,271 @@ async fn test_analyze_dependencies_use_case_error_handling() {
 
     // Should handle parsing errors gracefully
     assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_version_resolution_normal_path() {
+    use std::sync::Arc;
+
+    // Mock registry with versions (including a prerelease and a yanked one)
+    struct MockRegistry {
+        versions: Vec<crate::infrastructure::registries::VersionInfo>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::infrastructure::registries::PackageRegistryClient for MockRegistry {
+        async fn list_versions(
+            &self,
+            _ecosystem: crate::domain::Ecosystem,
+            _name: &str,
+        ) -> Result<
+            Vec<crate::infrastructure::registries::VersionInfo>,
+            crate::infrastructure::registries::RegistryError,
+        > {
+            Ok(self.versions.clone())
+        }
+    }
+
+    let ecosystem = crate::domain::Ecosystem::Npm;
+    let name = "demo-normal";
+    let current = crate::domain::Version::parse("1.0.0").unwrap();
+
+    // Versions: 1.0.0 (vuln), 1.1.0 (vuln), 1.2.0 (fixed), 1.3.0 (fixed), 2.0.0-alpha (fixed prerelease), 0.9.0 (yanked)
+    let versions = vec![
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("0.9.0").unwrap(),
+            true,
+            None,
+        ),
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("1.0.0").unwrap(),
+            false,
+            None,
+        ),
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("1.1.0").unwrap(),
+            false,
+            None,
+        ),
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("1.2.0").unwrap(),
+            false,
+            None,
+        ),
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("1.3.0").unwrap(),
+            false,
+            None,
+        ),
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("2.0.0-alpha.1").unwrap(),
+            false,
+            None,
+        ),
+    ];
+
+    // Vulnerability: < 1.2.0 vulnerable, fixed at 1.2.0
+    let affected_pkg = crate::domain::Package::new(
+        name.to_string(),
+        crate::domain::Version::parse("0.0.0").unwrap(),
+        ecosystem.clone(),
+    )
+    .unwrap();
+    let vuln = crate::domain::Vulnerability::new(
+        crate::domain::VulnerabilityId::new("TEST-1".to_string()).unwrap(),
+        "Test vuln normal".into(),
+        "desc".into(),
+        crate::domain::Severity::High,
+        vec![crate::domain::AffectedPackage::new(
+            affected_pkg,
+            vec![crate::domain::VersionRange::less_than(
+                crate::domain::Version::parse("1.2.0").unwrap(),
+            )],
+            vec![crate::domain::Version::parse("1.2.0").unwrap()],
+        )],
+        vec![],
+        chrono::Utc::now(),
+        vec![crate::domain::VulnerabilitySource::OSV],
+    )
+    .unwrap();
+
+    let registry = Arc::new(MockRegistry { versions });
+    let svc = crate::application::VersionResolutionServiceImpl::new(registry);
+
+    let rec = svc
+        .recommend(
+            ecosystem.clone(),
+            name,
+            Some(current.clone()),
+            &[vuln.clone()],
+        )
+        .await
+        .expect("recommend ok");
+
+    assert_eq!(rec.nearest_safe_above_current.unwrap().to_string(), "1.2.0");
+    assert_eq!(rec.most_up_to_date_safe.unwrap().to_string(), "1.3.0");
+    assert!(
+        rec.notes.is_empty(),
+        "no notes expected in normal happy path"
+    );
+}
+
+#[tokio::test]
+async fn test_version_resolution_fallback_when_registry_unavailable() {
+    use std::sync::Arc;
+
+    // Failing registry returns an error → triggers fallback using fixed_versions
+    struct FailingRegistry;
+
+    #[async_trait::async_trait]
+    impl crate::infrastructure::registries::PackageRegistryClient for FailingRegistry {
+        async fn list_versions(
+            &self,
+            _ecosystem: crate::domain::Ecosystem,
+            _name: &str,
+        ) -> Result<
+            Vec<crate::infrastructure::registries::VersionInfo>,
+            crate::infrastructure::registries::RegistryError,
+        > {
+            Err(crate::infrastructure::registries::RegistryError::Other(
+                "unavailable".into(),
+            ))
+        }
+    }
+
+    let ecosystem = crate::domain::Ecosystem::Npm;
+    let name = "demo-fallback";
+    let current = crate::domain::Version::parse("1.0.0").unwrap();
+
+    // Vulnerability with multiple fixed versions
+    let affected_pkg = crate::domain::Package::new(
+        name.to_string(),
+        crate::domain::Version::parse("0.0.0").unwrap(),
+        ecosystem.clone(),
+    )
+    .unwrap();
+    let vuln = crate::domain::Vulnerability::new(
+        crate::domain::VulnerabilityId::new("TEST-2".to_string()).unwrap(),
+        "Test vuln fallback".into(),
+        "desc".into(),
+        crate::domain::Severity::Medium,
+        vec![crate::domain::AffectedPackage::new(
+            affected_pkg,
+            vec![crate::domain::VersionRange::less_than(
+                crate::domain::Version::parse("2.0.0").unwrap(),
+            )],
+            vec![
+                crate::domain::Version::parse("1.1.0").unwrap(),
+                crate::domain::Version::parse("1.2.0").unwrap(),
+            ],
+        )],
+        vec![],
+        chrono::Utc::now(),
+        vec![crate::domain::VulnerabilitySource::OSV],
+    )
+    .unwrap();
+
+    let registry = Arc::new(FailingRegistry);
+    let svc = crate::application::VersionResolutionServiceImpl::new(registry);
+
+    let rec = svc
+        .recommend(ecosystem.clone(), name, Some(current), &[vuln])
+        .await
+        .expect("recommend ok");
+
+    // Fallback uses minimal fixed >= current → 1.1.0
+    assert_eq!(rec.nearest_safe_above_current.unwrap().to_string(), "1.1.0");
+    assert!(
+        rec.most_up_to_date_safe.is_none(),
+        "no up-to-date safe without registry list"
+    );
+    assert!(
+        rec.notes.iter().any(|n| n.contains("registry unavailable")),
+        "should note registry unavailability"
+    );
+}
+
+#[tokio::test]
+async fn test_version_resolution_ghsa_influence() {
+    use std::sync::Arc;
+
+    // Mock registry where newest safe exists beyond GHSA first patched
+    struct MockRegistryGhsa {
+        versions: Vec<crate::infrastructure::registries::VersionInfo>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::infrastructure::registries::PackageRegistryClient for MockRegistryGhsa {
+        async fn list_versions(
+            &self,
+            _ecosystem: crate::domain::Ecosystem,
+            _name: &str,
+        ) -> Result<
+            Vec<crate::infrastructure::registries::VersionInfo>,
+            crate::infrastructure::registries::RegistryError,
+        > {
+            Ok(self.versions.clone())
+        }
+    }
+
+    let ecosystem = crate::domain::Ecosystem::Npm;
+    let name = "demo-ghsa";
+    let current = crate::domain::Version::parse("1.1.0").unwrap();
+
+    // Versions include GHSA first patched version (1.1.1) and a newer safe (1.1.2)
+    let versions = vec![
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("1.1.0").unwrap(),
+            false,
+            None,
+        ),
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("1.1.1").unwrap(),
+            false,
+            None,
+        ),
+        crate::infrastructure::registries::VersionInfo::new(
+            crate::domain::Version::parse("1.1.2").unwrap(),
+            false,
+            None,
+        ),
+    ];
+
+    // GHSA-style fixed event: firstPatchedVersion = 1.1.1
+    let affected_pkg = crate::domain::Package::new(
+        name.to_string(),
+        crate::domain::Version::parse("0.0.0").unwrap(),
+        ecosystem.clone(),
+    )
+    .unwrap();
+    let vuln_ghsa = crate::domain::Vulnerability::new(
+        crate::domain::VulnerabilityId::new("GHSA-xxxx".to_string()).unwrap(),
+        "GHSA vuln".into(),
+        "desc".into(),
+        crate::domain::Severity::High,
+        vec![crate::domain::AffectedPackage::new(
+            affected_pkg,
+            vec![crate::domain::VersionRange::less_than(
+                crate::domain::Version::parse("1.1.1").unwrap(),
+            )],
+            vec![crate::domain::Version::parse("1.1.1").unwrap()],
+        )],
+        vec![],
+        chrono::Utc::now(),
+        vec![crate::domain::VulnerabilitySource::GHSA],
+    )
+    .unwrap();
+
+    let registry = Arc::new(MockRegistryGhsa { versions });
+    let svc = crate::application::VersionResolutionServiceImpl::new(registry);
+
+    let rec = svc
+        .recommend(ecosystem, name, Some(current), &[vuln_ghsa])
+        .await
+        .expect("recommend ok");
+
+    // Nearest >= current should be GHSA's first patched version 1.1.1
+    assert_eq!(rec.nearest_safe_above_current.unwrap().to_string(), "1.1.1");
+    // Most up-to-date safe is 1.1.2
+    assert_eq!(rec.most_up_to_date_safe.unwrap().to_string(), "1.1.2");
 }

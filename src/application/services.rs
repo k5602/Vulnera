@@ -14,6 +14,8 @@ where
     R: crate::infrastructure::registries::PackageRegistryClient,
 {
     registry: std::sync::Arc<R>,
+    cache_service: Option<std::sync::Arc<crate::application::CacheServiceImpl>>,
+    registry_versions_ttl: std::time::Duration,
 }
 
 impl<R> VersionResolutionServiceImpl<R>
@@ -21,7 +23,36 @@ where
     R: crate::infrastructure::registries::PackageRegistryClient,
 {
     pub fn new(registry: std::sync::Arc<R>) -> Self {
-        Self { registry }
+        // TTL follows backend cache config: VULNERA__CACHE__TTL_HOURS (default 24)
+        let ttl_hours = std::env::var("VULNERA__CACHE__TTL_HOURS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(24);
+        let registry_versions_ttl = std::time::Duration::from_secs(ttl_hours * 3600);
+
+        Self {
+            registry,
+            cache_service: None,
+            registry_versions_ttl,
+        }
+    }
+
+    pub fn new_with_cache(
+        registry: std::sync::Arc<R>,
+        cache_service: std::sync::Arc<crate::application::CacheServiceImpl>,
+    ) -> Self {
+        // TTL follows backend cache config: VULNERA__CACHE__TTL_HOURS (default 24)
+        let ttl_hours = std::env::var("VULNERA__CACHE__TTL_HOURS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(24);
+        let registry_versions_ttl = std::time::Duration::from_secs(ttl_hours * 3600);
+
+        Self {
+            registry,
+            cache_service: Some(cache_service),
+            registry_versions_ttl,
+        }
     }
 }
 
@@ -38,34 +69,154 @@ where
         current: Option<crate::domain::Version>,
         vulnerabilities: &[crate::domain::Vulnerability],
     ) -> Result<super::VersionRecommendation, crate::application::errors::ApplicationError> {
-        // SKELETON IMPLEMENTATION:
-        // - Uses registry to fetch versions (best-effort; ignore failures for now)
-        // - Returns placeholders for nearest and most-up-to-date safe recommendations
-        // - The full algorithm will be implemented in subsequent steps of Phase 4
-
-        // Best-effort registry fetch (ignore errors to avoid blocking analysis flow).
-        let _versions = crate::infrastructure::registries::PackageRegistryClient::list_versions(
-            &*self.registry,
-            ecosystem,
-            name,
-        )
-        .await
-        .unwrap_or_default();
-
-        // Placeholder: compute recommendations later using OSV + GHSA merged model
-        let mut notes = Vec::new();
-        if current.is_some() && !vulnerabilities.is_empty() {
-            notes.push("version resolution pending: algorithm will compute nearest and most up-to-date safe versions".to_string());
+        // Fetch available versions from registry with optional cache
+        let versions_res = if let Some(cache) = &self.cache_service {
+            let cache_key =
+                crate::application::CacheServiceImpl::registry_versions_key(&ecosystem, name);
+            match cache
+                .get::<Vec<crate::infrastructure::registries::VersionInfo>>(&cache_key)
+                .await
+            {
+                Ok(Some(cached)) => {
+                    tracing::debug!(%name, ecosystem=?ecosystem, "registry versions cache hit");
+                    Ok(cached)
+                }
+                _ => {
+                    tracing::debug!(%name, ecosystem=?ecosystem, "registry versions cache miss; querying registry");
+                    let res =
+                        crate::infrastructure::registries::PackageRegistryClient::list_versions(
+                            &*self.registry,
+                            ecosystem.clone(),
+                            name,
+                        )
+                        .await;
+                    if let Ok(ref versions) = res {
+                        // Cache using backend-configured TTL (VULNERA__CACHE__TTL_HOURS)
+                        let ttl = self.registry_versions_ttl;
+                        if let Err(e) = cache.set(&cache_key, versions, ttl).await {
+                            tracing::warn!(error=?e, %name, ecosystem=?ecosystem, "failed to cache registry versions");
+                        }
+                    }
+                    res
+                }
+            }
         } else {
+            crate::infrastructure::registries::PackageRegistryClient::list_versions(
+                &*self.registry,
+                ecosystem.clone(),
+                name,
+            )
+            .await
+        };
+
+        // Helper: vulnerability predicate using merged OSV + GHSA model
+        let is_vulnerable = |v: &crate::domain::Version| -> bool {
+            vulnerabilities.iter().any(|vv| {
+                vv.affected_packages.iter().any(|ap| {
+                    // Build a package for matching name/ecosystem, with candidate version
+                    if let Ok(pkg) =
+                        crate::domain::Package::new(name.to_string(), v.clone(), ecosystem.clone())
+                    {
+                        ap.package.matches(&pkg) && ap.is_vulnerable(v)
+                    } else {
+                        false
+                    }
+                })
+            })
+        };
+
+        let mut notes: Vec<String> = Vec::new();
+
+        // Registry unavailable fallback (nearest from fixed versions only)
+        if versions_res.is_err() {
+            notes.push("registry unavailable; using fixed versions from OSV/GHSA for nearest recommendation".to_string());
+
+            let nearest_safe_above_current = current.as_ref().and_then(|cur| {
+                // collect minimal fixed version >= current
+                let mut candidates: Vec<crate::domain::Version> = Vec::new();
+                for vv in vulnerabilities {
+                    for ap in &vv.affected_packages {
+                        if ap.package.name == name && ap.package.ecosystem == ecosystem {
+                            for fx in &ap.fixed_versions {
+                                if fx >= cur {
+                                    candidates.push(fx.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                candidates.sort();
+                candidates.into_iter().next()
+            });
+
+            return Ok(super::VersionRecommendation {
+                nearest_safe_above_current,
+                most_up_to_date_safe: None,
+                notes,
+            });
+        }
+
+        let mut versions = versions_res.unwrap_or_default();
+        if versions.is_empty() {
+            notes.push("registry returned no versions for this package".to_string());
+        }
+        // Filter out yanked/unlisted
+        let pre_filter_len = versions.len();
+        versions.retain(|vi| !vi.yanked);
+        if pre_filter_len > 0 && versions.is_empty() {
             notes.push(
-                "version resolution pending: insufficient context or no vulnerabilities"
+                "all registry versions are yanked/unlisted; cannot recommend from registry"
                     .to_string(),
             );
         }
+        // Sort ascending by version (defensive)
+        versions.sort_by(|a, b| a.version.cmp(&b.version));
+
+        // Build safe sets
+        let mut safe_all: Vec<&crate::infrastructure::registries::VersionInfo> = Vec::new();
+        let mut safe_stable: Vec<&crate::infrastructure::registries::VersionInfo> = Vec::new();
+        for vi in &versions {
+            if !is_vulnerable(&vi.version) {
+                safe_all.push(vi);
+                if !vi.is_prerelease {
+                    safe_stable.push(vi);
+                }
+            }
+        }
+
+        // most_up_to_date_safe: prefer stable, else prerelease
+        let most_up_to_date_safe = if let Some(last) = safe_stable.last() {
+            Some(last.version.clone())
+        } else if let Some(last) = safe_all.last() {
+            if last.is_prerelease {
+                notes
+                    .push("only prerelease versions are safe; recommending prerelease".to_string());
+            }
+            Some(last.version.clone())
+        } else {
+            notes.push("no known safe version; all available versions are vulnerable".to_string());
+            None
+        };
+
+        // nearest_safe_above_current: min safe >= current (prefer stable)
+        let nearest_safe_above_current = current.as_ref().and_then(|cur| {
+            let stable_candidate = safe_stable.iter().find(|vi| vi.version >= *cur);
+            if let Some(c) = stable_candidate {
+                return Some(c.version.clone());
+            }
+            let any_candidate = safe_all.iter().find(|vi| vi.version >= *cur);
+            if let Some(c) = any_candidate {
+                if c.is_prerelease {
+                    notes.push("nearest safe >= current is a prerelease".to_string());
+                }
+                return Some(c.version.clone());
+            }
+            None
+        });
 
         Ok(super::VersionRecommendation {
-            nearest_safe_above_current: None,
-            most_up_to_date_safe: None,
+            nearest_safe_above_current,
+            most_up_to_date_safe,
             notes,
         })
     }
@@ -768,6 +919,16 @@ impl CacheServiceImpl {
     /// Generate cache key for parsed packages
     pub fn parsed_packages_key(content_hash: &str, ecosystem: &Ecosystem) -> String {
         format!("packages:{}:{}", ecosystem.canonical_name(), content_hash)
+    }
+
+    /// Generate cache key for registry versions for a package (used by VersionResolutionService)
+    /// Example: registry_versions:npm:express
+    pub fn registry_versions_key(ecosystem: &Ecosystem, package_name: &str) -> String {
+        format!(
+            "registry_versions:{}:{}",
+            ecosystem.canonical_name(),
+            package_name
+        )
     }
 
     /// Generate a hash for file content to use as cache key component

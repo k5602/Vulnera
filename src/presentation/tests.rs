@@ -4,12 +4,14 @@ mod tests {
         application::errors::VulnerabilityError,
         application::{
             AnalysisServiceImpl, CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl,
+            VersionResolutionServiceImpl,
         },
         domain::Package,
         infrastructure::{
             api_clients::traits::{RawVulnerability, VulnerabilityApiClient},
             cache::file_cache::FileCacheRepository,
             parsers::ParserFactory,
+            registries::MultiplexRegistryClient,
             repositories::AggregatingVulnerabilityRepository,
         },
         presentation::{AppState, create_router},
@@ -70,6 +72,10 @@ mod tests {
             cache_service.clone(),
             config,
         ));
+        // Provide a simple version resolution service for tests
+        let version_resolution_service = Arc::new(VersionResolutionServiceImpl::new(Arc::new(
+            MultiplexRegistryClient::new(),
+        )));
 
         AppState {
             analysis_service,
@@ -78,6 +84,7 @@ mod tests {
             vulnerability_repository: vuln_repo,
             popular_package_service,
             repository_analysis_service: None,
+            version_resolution_service,
         }
     }
 

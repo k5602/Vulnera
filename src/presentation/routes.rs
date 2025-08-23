@@ -61,7 +61,15 @@ use axum::{
             SeverityBreakdownDto,
             PaginationDto,
             ErrorResponse,
-            HealthResponse
+            HealthResponse,
+            VersionRecommendationDto,
+            RepositoryAnalysisRequest,
+            RepositoryAnalysisResponse,
+            RepositoryFileResultDto,
+            RepositoryPackageDto,
+            RepositoryAnalysisMetadataDto,
+            RepositoryConfigCapsDto,
+            RepositoryDescriptorDto
         )
     ),
     tags(

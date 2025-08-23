@@ -7,11 +7,13 @@ use vulnera_rust::{
     Config,
     application::{
         AnalysisServiceImpl, CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl,
+        VersionResolutionServiceImpl,
     },
     infrastructure::{
         api_clients::{ghsa::GhsaClient, nvd::NvdClient, osv::OsvClient},
         cache::file_cache::FileCacheRepository,
         parsers::ParserFactory,
+        registries::MultiplexRegistryClient,
         repositories::AggregatingVulnerabilityRepository,
         repository_source::GitHubRepositoryClient,
     },
@@ -110,6 +112,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config_arc,
     ));
 
+    // Create version resolution service (with cache for registry versions)
+    let registry_client = Arc::new(MultiplexRegistryClient::new());
+    let version_resolution_service = Arc::new(VersionResolutionServiceImpl::new_with_cache(
+        registry_client,
+        cache_service.clone(),
+    ));
+
     // Create application state
     let app_state = AppState {
         analysis_service,
@@ -118,6 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         vulnerability_repository,
         popular_package_service,
         repository_analysis_service,
+        version_resolution_service,
     };
 
     // Create router

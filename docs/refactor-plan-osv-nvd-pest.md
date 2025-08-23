@@ -294,7 +294,7 @@ Phase 3: Pest Parsers (Priority Formats)
 
 Phase 4: Safe Version Recommendation & GHSA Integration
 
-- Status: Parsers done — RubyGems (Gemfile, Gemfile.lock) and NuGet (.csproj/.fsproj/.vbproj, packages.config) implemented, registered in ParserFactory, and fully tested. Starting Phase 4 now.
+- Status: In progress — Parsers done; GHSA affected mapping implemented (fixed events + ecosystem mapping), PackageRegistryClient abstraction added, VersionResolutionService skeleton added, and AnalysisResponse DTO extended with optional version_recommendations (placeholder). Build is green; next we’ll implement registry clients and the full recommendation algorithm.
 - Objective: For each dependency, return two upgrade options when current version is known:
   1. nearest_safe_above_current — the smallest safe version greater than or equal to the current version.
   2. most_up_to_date_safe — the newest safe version available.
@@ -364,13 +364,18 @@ Phase 4: Safe Version Recommendation & GHSA Integration
   - presentation/: extend DTOs and response assembly to include both recommendations per dependency; update OpenAPI.
   - Add integration tests for recommendation outcomes with mocked registry + OSV/GHSA inputs.
 
-- Start:
-  - Begin GHSA affected mapping and VersionResolutionService implementation first, then wire registries and DTO updates.
+- Progress so far:
+  - GHSA affected mapping completed; VersionResolutionService skeleton added; PackageRegistryClient introduced; DTO changes and controller wiring in place (placeholders).
+- Next:
+  - Implement registry clients for npm, PyPI, RubyGems, NuGet, and Cargo with caching/resilience.
+  - Complete the algorithm in VersionResolutionService to compute nearest_safe_above_current and most_up_to_date_safe, handle prerelease/yanked policies and registry-unavailable fallback, add tests, and populate recommendations in responses.
 
 Phase 5: Cleanups & Docs
 
 - Remove dead code from old manual OSV/NVD models.
-- Update docs and examples; add admin instructions for NVD dataset bootstrap/update.
+- Update docs and api examples.
+- Update open api
+- Add Admin Guide: NVD Local Cache (drafted below).
 - Final regression and `make ci-check`.
 
 Phase 6: Optional
