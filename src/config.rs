@@ -78,8 +78,6 @@ pub struct ApiConfig {
     pub github: GitHubConfig,
 }
 
-/// OSV API configuration
-
 /// NVD API configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NvdConfig {

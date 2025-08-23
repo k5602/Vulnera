@@ -113,16 +113,30 @@ impl YarnPestParser {
                     header_text = Some(p.as_str().to_string());
 
                     for hp in p.into_inner() {
-                        if hp.as_rule() == Rule::key_list {
-                            for kp in hp.into_inner() {
-                                if kp.as_rule() == Rule::key_spec {
-                                    if let Some(name) =
-                                        Self::extract_name_from_key_spec(kp.as_str())
-                                    {
-                                        names.push(name);
+                        match hp.as_rule() {
+                            // Collect names from header key list; key_spec is a silent rule,
+                            // so inner pairs are quoted_string or bare_fragment.
+                            Rule::key_list => {
+                                for ks in hp.into_inner() {
+                                    match ks.as_rule() {
+                                        Rule::quoted_string | Rule::bare_fragment => {
+                                            if let Some(name) =
+                                                Self::extract_name_from_key_spec(ks.as_str())
+                                            {
+                                                names.push(name);
+                                            }
+                                        }
+                                        _ => {}
                                     }
                                 }
                             }
+                            // In case grammar surfaces tokens directly (defensive)
+                            Rule::quoted_string | Rule::bare_fragment => {
+                                if let Some(name) = Self::extract_name_from_key_spec(hp.as_str()) {
+                                    names.push(name);
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -237,7 +251,7 @@ impl YarnPestParser {
                 if let (Some(h), Some(v)) = (&current_header, &current_version) {
                     let names = Self::fallback_extract_names_from_header(h);
                     for name in names {
-                        let ver = Version::parse(&v).unwrap_or_else(|_| Version::new(0, 0, 0));
+                        let ver = Version::parse(v).unwrap_or_else(|_| Version::new(0, 0, 0));
                         if let Ok(pkg) = Package::new(name, ver.clone(), Ecosystem::Npm) {
                             packages.push(pkg);
                         }
@@ -430,5 +444,65 @@ lodash@^4.17.21:
             YarnPestParser::extract_name_from_key_spec("leftpad"),
             Some("leftpad".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn test_grouped_headers_parsing() {
+        // Multiple grouped header specs should dedupe to a single package name
+        let content = r#"
+left-pad@^1.3.0, "left-pad@~1.2.0":
+  version "1.3.0"
+"#;
+
+        let parser = YarnPestParser::new();
+        let pkgs = parser.parse_file(content).await.unwrap();
+
+        let count = pkgs.iter().filter(|p| p.name == "left-pad").count();
+        assert_eq!(
+            count,
+            1,
+            "Expected exactly one left-pad package entry, got: {:?}",
+            pkgs.iter()
+                .map(|p| (&p.name, p.version.to_string()))
+                .collect::<Vec<_>>()
+        );
+        assert!(pkgs.iter().any(|p| p.name == "left-pad"
+            && p.version == Version::parse("1.3.0").unwrap()
+            && p.ecosystem == Ecosystem::Npm));
+    }
+
+    #[tokio::test]
+    async fn test_dependencies_only_entry() {
+        // Entry with dependencies block but missing resolved/integrity should still parse version
+        let content = r#"
+minimist@^1.2.8:
+  version "1.2.8"
+  dependencies:
+    kind-of "^3.2.2"
+"#;
+
+        let parser = YarnPestParser::new();
+        let pkgs = parser.parse_file(content).await.unwrap();
+
+        assert!(pkgs.iter().any(|p| p.name == "minimist"
+            && p.version == Version::parse("1.2.8").unwrap()
+            && p.ecosystem == Ecosystem::Npm));
+    }
+
+    #[tokio::test]
+    async fn test_integrity_only_entry() {
+        // Entry with only version + integrity (no resolved) should still parse version
+        let content = r#"
+nan@^2.17.0:
+  version "2.17.0"
+  integrity sha512-ABCDEFG
+"#;
+
+        let parser = YarnPestParser::new();
+        let pkgs = parser.parse_file(content).await.unwrap();
+
+        assert!(pkgs.iter().any(|p| p.name == "nan"
+            && p.version == Version::parse("2.17.0").unwrap()
+            && p.ecosystem == Ecosystem::Npm));
     }
 }

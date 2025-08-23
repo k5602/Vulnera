@@ -1,0 +1,145 @@
+///////////////////////////////////////////////////////////
+// Pest grammar for Gradle (Groovy & Kotlin DSL) dependency declarations
+//
+// Scope:
+// - Recognize dependency declarations inside a dependencies { ... } block
+//   and also tolerate standalone dependency statements (best-effort).
+// - Support common configurations: implementation, api, compileOnly, runtimeOnly,
+//   testImplementation, annotationProcessor, kapt, etc.
+// - Support both Groovy and Kotlin DSL forms:
+//   1) configuration 'group:artifact:version'
+//   2) configuration "group:artifact:version"
+//   3) configuration("group:artifact:version")
+//   4) configuration group: 'g', name: 'a', version: 'v'           (Groovy named args)
+//   5) configuration group = "g", name = "a", version = "v"        (Kotlin named args)
+//   6) configuration platform('group:artifact:version')
+//      configuration enforcedPlatform("group:artifact:version")
+//   7) configuration project(':module')                            (ignored for extraction)
+//
+// Notes:
+// - This grammar focuses on dependency lines and is permissive elsewhere.
+// - Comments (// and /* */) are supported and can appear almost anywhere.
+// - Extraction code should read:
+//     * config_name (configuration)
+//     * quoted group:artifact:version strings (direct or inside platform())
+//     * or named args (group/name/version) in groovy/kotlin forms
+///////////////////////////////////////////////////////////
+
+WHITESPACE       = _{ " " | "\t" | NEWLINE }
+SP               = _{ " " | "\t" }
+NEWLINE          = _{ "\r\n" | "\n" }
+
+comment_line     = _{ "//" ~ (!NEWLINE ~ ANY)* ~ NEWLINE? }
+comment_block    = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+COMMENT          = _{ comment_line | comment_block }
+
+OPT_SEP          = _{ (SP | NEWLINE | COMMENT)* }
+SEP              = _{ (SP | NEWLINE | COMMENT)+ }
+
+///////////////////////////////////////////////////////////
+// Strings and identifiers
+///////////////////////////////////////////////////////////
+
+dq_char          = _{ "\\\"" | "\\\\" | (!"\"" ~ ANY) }
+sq_char          = _{ "\\\'" | "\\\\" | (!"\'" ~ ANY) }
+double_quoted    = @{ "\"" ~ dq_char* ~ "\"" }
+single_quoted    = @{ "\'" ~ sq_char* ~ "\'" }
+quoted_string    = _{ double_quoted | single_quoted }
+
+ident_char_head  = _{ ('A'..'Z' | 'a'..'z') | "_" }
+ident_char_tail  = _{ ('A'..'Z' | 'a'..'z' | '0'..'9') | "_" | "-" }
+identifier       = @{ ident_char_head ~ ident_char_tail* }
+
+///////////////////////////////////////////////////////////
+// Dependencies block
+///////////////////////////////////////////////////////////
+
+dependencies_block = {
+    "dependencies" ~ OPT_SEP ~ "{" ~
+        (dep_stmt ~ OPT_SEP)* ~
+    OPT_SEP ~ "}"
+}
+
+///////////////////////////////////////////////////////////
+// Dependency statements
+///////////////////////////////////////////////////////////
+
+// A set of common configuration names; extend as needed
+config_name = _{
+      "implementation"
+    | "api"
+    | "compileOnly"
+    | "runtimeOnly"
+    | "testImplementation"
+    | "testCompile"
+    | "testCompileOnly"
+    | "testRuntimeOnly"
+    | "annotationProcessor"
+    | "kapt"
+    | "kaptTest"
+    | "compile"
+    | "provided"
+    | "runtime"
+    | "testRuntime"
+}
+
+// Main dependency statement form:
+//   <config_name> (platform|enforcedPlatform)? ( "coord" | ('(' "coord" ')') | named_args | project_call )
+dep_stmt = {
+    config_name ~ OPT_SEP ~ (
+          enclosed_platform_call
+        | enclosed_named_args
+        | platform_call
+        | enclosed_coord
+        | quoted_string
+        | named_args_groovy
+        | named_args_kotlin
+        | project_call
+    )
+    ~ OPT_SEP
+}
+
+// Parenthesized coordinate string (Kotlin DSL or Groovy with parens)
+enclosed_coord = { "(" ~ OPT_SEP ~ quoted_string ~ OPT_SEP ~ ")" }
+
+enclosed_platform_call = { "(" ~ OPT_SEP ~ platform_call ~ OPT_SEP ~ ")" }
+
+enclosed_named_args = { "(" ~ OPT_SEP ~ ( named_args_groovy | named_args_kotlin ) ~ OPT_SEP ~ ")" }
+
+platform_call = {
+    ( "platform" | "enforcedPlatform" )
+    ~ OPT_SEP ~ "(" ~ OPT_SEP ~ ( quoted_string | named_args_groovy | named_args_kotlin ) ~ OPT_SEP ~ ")"
+}
+
+project_call = {
+    "project" ~ OPT_SEP ~ "(" ~ OPT_SEP ~ quoted_string ~ OPT_SEP ~ ")"
+}
+
+///////////////////////////////////////////////////////////
+// Named argument variants
+// Groovy:  group: 'g', name: 'a', version: 'v'
+// Kotlin:  group = "g", name = "a", version = "v"
+///////////////////////////////////////////////////////////
+
+named_key          = _{ "group" | "name" | "version" }
+
+kv_groovy          = { named_key ~ OPT_SEP ~ ":" ~ OPT_SEP ~ quoted_string }
+kv_kotlin          = { named_key ~ OPT_SEP ~ "=" ~ OPT_SEP ~ quoted_string }
+
+named_args_groovy  = { kv_groovy ~ (OPT_SEP ~ "," ~ OPT_SEP ~ kv_groovy)* }
+named_args_kotlin  = { kv_kotlin ~ (OPT_SEP ~ "," ~ OPT_SEP ~ kv_kotlin)* }
+
+///////////////////////////////////////////////////////////
+// File root: tolerate whole files or snippets
+///////////////////////////////////////////////////////////
+
+file = {
+    SOI ~ OPT_SEP ~
+    (
+        dependencies_block
+        | dep_stmt
+        | COMMENT
+        | (SP | NEWLINE)
+    )* ~
+    EOI
+}

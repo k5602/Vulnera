@@ -1,36 +1,21 @@
-# Rust formatting configuration
+# Rust formatting configuration (stable-only options)
+
+# Use the project's Rust edition
 edition = "2024"
+
+# Line width and whitespace
 max_width = 100
 hard_tabs = false
 tab_spaces = 4
 newline_style = "Unix"
+
+# Heuristics
 use_small_heuristics = "Default"
+
+# Imports and modules
 reorder_imports = true
 reorder_modules = true
-remove_nested_parens = true
-merge_derives = true
+
+# Shorthand preferences
 use_try_shorthand = false
 use_field_init_shorthand = false
-force_explicit_abi = true
-empty_item_single_line = true
-struct_lit_single_line = true
-fn_single_line = false
-where_single_line = false
-imports_layout = "Mixed"
-group_imports = "StdExternalCrate"
-fn_args_layout = "Tall"
-brace_style = "SameLineWhere"
-control_brace_style = "AlwaysSameLine"
-trailing_semicolon = true
-trailing_comma = "Vertical"
-match_block_trailing_comma = false
-blank_lines_upper_bound = 1
-blank_lines_lower_bound = 0
-normalize_comments = false
-normalize_doc_attributes = false
-license_template_path = ""
-format_code_in_doc_comments = false
-format_strings = false
-format_macro_matchers = false
-format_macro_bodies = true
-hex_literal_case = "Preserve"

@@ -72,6 +72,20 @@ optional_dependencies_block = {
     ~ dep_kv_line+
 }
 
+peer_dependencies_block = {
+    INDENT ~ "peerDependencies" ~ OPT_SP ~ ":" ~ line_ending
+    ~ dep_kv_line+
+}
+
+bundled_dependencies_block = {
+    INDENT ~ "bundledDependencies" ~ OPT_SP ~ ":" ~ line_ending
+    ~ (dep_kv_line | dep_name_line)+
+}
+
+dep_name_line = {
+    INDENT2 ~ dep_key ~ line_ending
+}
+
 // A dependency key-value line (4 spaces indentation)
 // Accept quoted or bare value ranges.
 dep_kv_line = {
@@ -98,6 +112,8 @@ entry = {
       | integrity_line
       | dependencies_block
       | optional_dependencies_block
+      | peer_dependencies_block
+      | bundled_dependencies_block
       | comment_line
       | blank_line
       )*

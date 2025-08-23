@@ -60,6 +60,11 @@ impl ParserFactory {
         parsers.push(Box::new(
             crate::infrastructure::parsers::java::MavenParser::new(),
         ));
+        // Pest-based Gradle parser
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::gradle_pest::GradlePestParser::new(),
+        ));
+        // Legacy Gradle parser as fallback "deprecated once pest tested enough"
         parsers.push(Box::new(
             crate::infrastructure::parsers::java::GradleParser::new(),
         ));
