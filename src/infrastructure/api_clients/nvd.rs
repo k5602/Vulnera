@@ -1,400 +1,539 @@
-//! NVD API client implementation
-
 use super::traits::{RawVulnerability, VulnerabilityApiClient};
 use crate::application::errors::{ApiError, VulnerabilityError};
 use crate::domain::Package;
 use async_trait::async_trait;
-use reqwest::Client;
-use serde::Deserialize;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::sync::Mutex;
+use chrono::{Datelike, Utc};
+use nvd_cve::client::BlockingHttpClient;
+use nvd_cve::{
+    cache::{CacheConfig, search_by_id, search_description, sync_blocking},
+    client::ReqwestBlockingClient,
+    cve::CveFeed,
+};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
+use std::time::Duration;
 
-/// Rate limiter for NVD API requests
-#[derive(Debug)]
-pub struct RateLimiter {
-    /// Maximum number of requests allowed in the time window
-    max_requests: u32,
-    /// Time window for rate limiting (in seconds)
-    window_seconds: u64,
-    /// Request timestamps within the current window
-    request_times: Arc<Mutex<Vec<Instant>>>,
-}
+use tokio::task;
+use tokio::time::sleep;
 
-impl RateLimiter {
-    /// Create a new rate limiter
-    pub fn new(max_requests: u32, window_seconds: u64) -> Self {
-        Self {
-            max_requests,
-            window_seconds,
-            request_times: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
-
-    /// Create rate limiter for NVD without API key (5 requests per 30 seconds)
-    pub fn without_api_key() -> Self {
-        Self::new(5, 30)
-    }
-
-    /// Create rate limiter for NVD with API key (50 requests per 30 seconds)
-    pub fn with_api_key() -> Self {
-        Self::new(50, 30)
-    }
-
-    /// Wait until a request can be made according to rate limits
-    pub async fn wait_for_request(&self) -> Result<(), VulnerabilityError> {
-        loop {
-            let mut times = self.request_times.lock().await;
-            let now = Instant::now();
-            let window_start = now - Duration::from_secs(self.window_seconds);
-
-            // Remove requests outside the current window
-            times.retain(|&time| time > window_start);
-
-            // Check if we can make a request
-            if times.len() >= self.max_requests as usize {
-                // Calculate how long to wait
-                let oldest_request = times[0];
-                let wait_until = oldest_request + Duration::from_secs(self.window_seconds);
-                let wait_duration = wait_until.saturating_duration_since(now);
-
-                if wait_duration > Duration::ZERO {
-                    drop(times); // Release the lock before sleeping
-                    tokio::time::sleep(wait_duration).await;
-                    continue; // Try again after waiting
-                }
-            }
-
-            // Record this request and exit
-            times.push(now);
-            break;
-        }
-        Ok(())
-    }
-}
-
-/// NVD API response for CVE search
-#[derive(Debug, Deserialize)]
-struct NvdSearchResponse {
-    #[serde(rename = "vulnerabilities")]
-    vulnerabilities: Vec<NvdVulnerabilityWrapper>,
-    #[serde(rename = "totalResults")]
-    #[allow(dead_code)]
-    total_results: u32, // Future: pagination support
-}
-
-#[derive(Debug, Deserialize)]
-struct NvdVulnerabilityWrapper {
-    cve: NvdCve,
-}
-
-#[derive(Debug, Deserialize)]
-struct NvdCve {
-    id: String,
-    #[serde(rename = "sourceIdentifier")]
-    #[allow(dead_code)]
-    source_identifier: Option<String>, // Future: source tracking
-    published: Option<String>,
-    #[serde(rename = "lastModified")]
-    #[allow(dead_code)]
-    last_modified: Option<String>, // Future: update tracking
-    #[serde(rename = "vulnStatus")]
-    #[allow(dead_code)]
-    vuln_status: Option<String>, // Future: status filtering
-    descriptions: Option<Vec<NvdDescription>>,
-    metrics: Option<NvdMetrics>,
-    references: Option<Vec<NvdReference>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct NvdDescription {
-    lang: String,
-    value: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct NvdMetrics {
-    #[serde(rename = "cvssMetricV31")]
-    cvss_v31: Option<Vec<NvdCvssMetric>>,
-    #[serde(rename = "cvssMetricV30")]
-    cvss_v30: Option<Vec<NvdCvssMetric>>,
-    #[serde(rename = "cvssMetricV2")]
-    cvss_v2: Option<Vec<NvdCvssMetricV2>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct NvdCvssMetric {
-    #[allow(dead_code)]
-    source: String, // Future: CVSS source tracking
-    #[serde(rename = "type")]
-    #[allow(dead_code)]
-    metric_type: String, // Future: metric type categorization
-    #[serde(rename = "cvssData")]
-    cvss_data: NvdCvssData,
-}
-
-#[derive(Debug, Deserialize)]
-struct NvdCvssMetricV2 {
-    #[allow(dead_code)]
-    source: String, // Future: CVSS source tracking
-    #[serde(rename = "type")]
-    #[allow(dead_code)]
-    metric_type: String, // Future: metric type categorization
-    #[serde(rename = "cvssData")]
-    cvss_data: NvdCvssDataV2,
-}
-
-#[derive(Debug, Deserialize)]
-struct NvdCvssData {
-    #[allow(dead_code)]
-    version: String, // Future: CVSS version handling
-    #[serde(rename = "baseScore")]
-    base_score: f64,
-    #[serde(rename = "baseSeverity")]
-    #[allow(dead_code)]
-    base_severity: String, // Future: severity classification
-}
-
-#[derive(Debug, Deserialize)]
-struct NvdCvssDataV2 {
-    #[allow(dead_code)]
-    version: String, // Future: CVSS version handling
-    #[serde(rename = "baseScore")]
-    base_score: f64,
-}
-
-#[derive(Debug, Deserialize)]
-struct NvdReference {
-    url: String,
-    #[allow(dead_code)]
-    source: Option<String>, // Future: reference source tracking
-}
-
-/// Client for the NVD (National Vulnerability Database) API
+/// NVD client backed by a local `nvd_cve` SQLite cache.
+/// - The cache database is placed inside the configured cache directory:
+/// - Uses env var VULNERA__CACHE__DIRECTORY if set, otherwise defaults to ".vulnera_cache".
+/// - On first use (if db missing) it will sync the NVD feeds locally using a blocking reqwest client
+/// - on a blocking thread to avoid stalling the async runtime.
 pub struct NvdClient {
-    client: Client,
-    base_url: String,
+    /// Mirror base for NVD CVE 1.1 feeds
+    feed_base_url: String,
+    /// REST base for NVD JSON API v2.0
+    rest_base_url: String,
+    /// Absolute path to the SQLite database file managed by `nvd_cve`
+    db_path: PathBuf,
+    /// Feed names to sync
+    feeds: Vec<String>,
+    /// Show sync progress
+    show_progress: bool,
+    /// Path to sidecar CVSS index mapping (id -> base score)
+    cvss_index_path: PathBuf,
+    /// Optional NVD API key for REST requests (higher rate limits when present)
     api_key: Option<String>,
-    rate_limiter: RateLimiter,
 }
 
 impl NvdClient {
-    /// Create a new NVD client with the given configuration
+    /// Construct a new NVD client.
+    ///
+    /// The `base_url` parameter is treated as the NVD CVE 1.1 feeds base if it looks like a feed root.
+    /// If a REST API URL (e.g., "https://services.nvd.nist.gov/rest/json") is provided, REST base will
+    /// be taken from it while the feeds base falls back to the official 1.1 feeds mirror.
+    ///
+    /// If `api_key` is not provided, VULNERA__APIS__NVD__API_KEY will be used when present to unlock higher REST rate limits.
     pub fn new(base_url: String, api_key: Option<String>) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .user_agent("vulnera-rust/0.1.0")
-            .build()
-            .expect("Failed to create HTTP client");
+        // Determine cache directory
+        let cache_dir = std::env::var("VULNERA__CACHE__DIRECTORY")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(".vulnera_cache"));
 
-        let rate_limiter = if api_key.is_some() {
-            RateLimiter::with_api_key()
+        // Ensure cache directory exists (sync at construction time is fine)
+        if let Err(e) = std::fs::create_dir_all(&cache_dir) {
+            tracing::warn!(error=?e, dir=?cache_dir, "Failed to create cache directory, continuing");
+        }
+
+        // Compute feeds base and REST base
+        // nvd_cve expects the 1.1 feed base url; if we were passed the REST API URL, replace it
+        let (feed_base_url, rest_base_url) = if base_url.contains("/rest/json") {
+            (
+                "https://nvd.nist.gov/feeds/json/cve/1.1".to_string(),
+                base_url,
+            )
         } else {
-            RateLimiter::without_api_key()
+            (
+                base_url,
+                "https://services.nvd.nist.gov/rest/json".to_string(),
+            )
         };
 
-        Self {
-            client,
-            base_url,
+        let db_path = cache_dir.join("nvd_cve.sqlite");
+
+        // Build a reasonable default set of feeds:
+        // last 5 years + "recent" + "modified" (recent/modified last to avoid overwriting)
+        let mut feeds = Self::default_year_feeds(5);
+        feeds.push("recent".to_string());
+        feeds.push("modified".to_string());
+
+        // Resolve API key from param or environment
+        let api_key = api_key
+            .or_else(|| std::env::var("VULNERA__APIS__NVD__API_KEY").ok())
+            .filter(|s| !s.is_empty());
+
+        tracing::info!(
+            feed_base_url=%feed_base_url,
+            rest_base_url=%rest_base_url,
+            db_path=%db_path.display(),
+            feeds=?feeds,
+            has_api_key=%api_key.is_some(),
+            "Initialized NvdClient with local cache and optional REST enrichment"
+        );
+
+        let client = Self {
+            feed_base_url,
+            rest_base_url,
+            db_path,
+            feeds,
+            show_progress: false,
+            cvss_index_path: cache_dir.join("nvd_cvss_index.json"),
             api_key,
-            rate_limiter,
-        }
+        };
+        // Start periodic sync + CVSS index refresh (fire-and-forget)
+        client.start_periodic_sync();
+        client
     }
 
-    /// Create a new NVD client with default configuration
+    /// Construct with the official feeds base and default env-based cache directory
     pub fn default() -> Self {
-        Self::new("https://services.nvd.nist.gov/rest/json".to_string(), None)
+        Self::new("https://nvd.nist.gov/feeds/json/cve/1.1".to_string(), None)
     }
 
-    /// Create a new NVD client with API key
+    /// Compatibility constructor signature; api key unused in local-cache mode
     pub fn with_api_key(api_key: String) -> Self {
         Self::new(
-            "https://services.nvd.nist.gov/rest/json".to_string(),
+            "https://nvd.nist.gov/feeds/json/cve/1.1".to_string(),
             Some(api_key),
         )
     }
 
-    /// Search for CVEs using keyword search
-    pub async fn search_cves(
-        &self,
-        keyword: &str,
-    ) -> Result<Vec<RawVulnerability>, VulnerabilityError> {
-        self.rate_limiter.wait_for_request().await?;
-
-        let url = format!("{}/cves/2.0", self.base_url);
-        let query_params = vec![
-            ("keywordSearch", keyword),
-            ("resultsPerPage", "50"), // Maximum allowed by NVD
-        ];
-
-        let mut request = self.client.get(&url);
-
-        // Add query parameters
-        for (key, value) in query_params {
-            request = request.query(&[(key, value)]);
-        }
-
-        // Add API key if available
-        if let Some(ref api_key) = self.api_key {
-            request = request.header("apiKey", api_key);
-        }
-
-        let response = self.execute_with_retry(request).await?;
-
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(VulnerabilityError::Api(ApiError::Http {
-                status,
-                message: format!("NVD API error: {}", error_text),
-            }));
-        }
-
-        let nvd_response: NvdSearchResponse = response.json().await?;
-
-        let vulnerabilities = nvd_response
-            .vulnerabilities
-            .into_iter()
-            .map(|wrapper| Self::convert_nvd_vulnerability(wrapper.cve))
-            .collect();
-
-        Ok(vulnerabilities)
+    /// Generate a vector of year feed names, from (current_year - years_back) to current_year.
+    fn default_year_feeds(years_back: i32) -> Vec<String> {
+        let now = Utc::now();
+        let current_year = now.year();
+        let start_year = current_year.saturating_sub(years_back.max(0));
+        (start_year..=current_year).map(|y| y.to_string()).collect()
     }
 
-    /// Execute request with exponential backoff retry logic
-    async fn execute_with_retry(
-        &self,
-        request: reqwest::RequestBuilder,
-    ) -> Result<reqwest::Response, VulnerabilityError> {
-        let mut attempts = 0;
-        let max_attempts = 3;
-        let mut delay = Duration::from_millis(1000);
+    /// Build a fresh `nvd_cve::cache::CacheConfig` from our fields.
+    fn build_cache_config(&self) -> CacheConfig {
+        let mut cfg = CacheConfig::new();
+        cfg.url = self.feed_base_url.clone();
+        cfg.feeds = self.feeds.clone();
+        cfg.db = self.db_path.to_string_lossy().to_string();
+        cfg.show_progress = self.show_progress;
+        cfg.force_update = false;
+        cfg
+    }
 
-        loop {
-            attempts += 1;
-
-            // Clone the request for retry attempts
-            let req = request.try_clone().ok_or_else(|| {
-                VulnerabilityError::Api(ApiError::Http {
-                    status: 0,
-                    message: "Failed to clone request for retry".to_string(),
-                })
-            })?;
-
-            match req.send().await {
-                Ok(response) => {
-                    // Check for rate limiting or server errors that should be retried
-                    if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
-                        || response.status() == reqwest::StatusCode::INTERNAL_SERVER_ERROR
-                        || response.status() == reqwest::StatusCode::BAD_GATEWAY
-                        || response.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE
-                        || response.status() == reqwest::StatusCode::GATEWAY_TIMEOUT
-                    {
-                        if attempts >= max_attempts {
-                            return Ok(response); // Return the error response
-                        }
-
-                        tokio::time::sleep(delay).await;
-                        delay *= 2; // Exponential backoff
-                        continue;
-                    }
-
-                    return Ok(response);
-                }
-                Err(e) => {
-                    if attempts >= max_attempts {
-                        return Err(VulnerabilityError::Network(e));
-                    }
-
-                    tokio::time::sleep(delay).await;
-                    delay *= 2; // Exponential backoff
-                }
+    /// Ensure the local database exists; if it does not, run a blocking sync in a blocking thread.
+    async fn ensure_synced(&self) -> Result<(), VulnerabilityError> {
+        if self.db_path.exists() {
+            // Ensure CVSS index exists even if DB already present
+            let cfg = self.build_cache_config();
+            if !self.cvss_index_path.exists() {
+                let _ = self.regenerate_cvss_index(&cfg).await;
             }
+            return Ok(());
+        }
+
+        let cfg = self.build_cache_config();
+
+        tracing::info!(
+            db=%self.db_path.display(),
+            url=%cfg.url,
+            feeds=?cfg.feeds,
+            "NVD local DB not found; syncing feeds (one-time)"
+        );
+
+        // Perform the sync on a blocking thread
+        let res = task::spawn_blocking(move || {
+            let client =
+                <ReqwestBlockingClient as BlockingHttpClient>::new(&cfg.url, None, None, None);
+            sync_blocking(&cfg, client)
+        })
+        .await;
+
+        match res {
+            Ok(Ok(())) => {
+                tracing::info!(db=%self.db_path.display(), "NVD local cache sync completed");
+                // Build CVSS index after initial sync
+                let cfg2 = self.build_cache_config();
+                let _ = self.regenerate_cvss_index(&cfg2).await;
+                Ok(())
+            }
+            Ok(Err(err)) => Err(VulnerabilityError::Api(ApiError::Http {
+                status: 500,
+                message: format!("NVD local cache sync failed: {:?}", err),
+            })),
+            Err(join_err) => Err(VulnerabilityError::Api(ApiError::Http {
+                status: 500,
+                message: format!("NVD local cache sync join error: {}", join_err),
+            })),
         }
     }
 
-    /// Convert NVD CVE to RawVulnerability
-    fn convert_nvd_vulnerability(nvd_cve: NvdCve) -> RawVulnerability {
-        // Extract description (prefer English)
-        let description = nvd_cve
-            .descriptions
-            .as_ref()
-            .and_then(|descriptions| {
-                descriptions
-                    .iter()
-                    .find(|desc| desc.lang == "en")
-                    .or_else(|| descriptions.first())
-            })
-            .map(|desc| desc.value.clone())
+    fn convert_cve_to_raw(&self, c: nvd_cve::cve::Cve) -> RawVulnerability {
+        // ID
+        let id = c.cve_data_meta.id;
+
+        // Description (prefer English)
+        let description = c
+            .description
+            .description_data
+            .iter()
+            .find(|d| d.lang == "en")
+            .or_else(|| c.description.description_data.first())
+            .map(|d| d.value.clone())
             .unwrap_or_default();
 
-        // Extract CVSS score and severity
-        let severity = nvd_cve.metrics.as_ref().and_then(|metrics| {
-            // Prefer CVSS v3.1, then v3.0, then v2
-            metrics
-                .cvss_v31
-                .as_ref()
-                .and_then(|v31| v31.first())
-                .map(|metric| metric.cvss_data.base_score.to_string())
-                .or_else(|| {
-                    metrics
-                        .cvss_v30
-                        .as_ref()
-                        .and_then(|v30| v30.first())
-                        .map(|metric| metric.cvss_data.base_score.to_string())
-                })
-                .or_else(|| {
-                    metrics
-                        .cvss_v2
-                        .as_ref()
-                        .and_then(|v2| v2.first())
-                        .map(|metric| metric.cvss_data.base_score.to_string())
-                })
-        });
-
-        // Extract references
-        let references = nvd_cve
+        // References
+        let references = c
             .references
-            .unwrap_or_default()
+            .reference_data
             .into_iter()
             .map(|r| r.url)
-            .collect();
+            .collect::<Vec<_>>();
 
-        // Parse published date - NVD uses ISO-8601 format
-        let published_at = nvd_cve
-            .published
-            .and_then(|p| {
-                // Try parsing with different ISO-8601 formats that NVD uses
-                chrono::DateTime::parse_from_rfc3339(&p)
-                    .or_else(|_| {
-                        // Try with Z suffix (UTC) - with milliseconds
-                        chrono::DateTime::parse_from_str(&p, "%Y-%m-%dT%H:%M:%S%.3fZ")
-                    })
-                    .or_else(|_| {
-                        // Try with Z suffix (UTC) - without milliseconds
-                        chrono::DateTime::parse_from_str(&p, "%Y-%m-%dT%H:%M:%SZ")
-                    })
-                    .or_else(|_| {
-                        // Try without timezone info, assume UTC
-                        chrono::NaiveDateTime::parse_from_str(&p, "%Y-%m-%dT%H:%M:%S%.3f")
-                            .or_else(|_| {
-                                chrono::NaiveDateTime::parse_from_str(&p, "%Y-%m-%dT%H:%M:%S")
-                            })
-                            .map(|dt| dt.and_utc().fixed_offset())
-                    })
-                    .ok()
-            })
-            .map(|dt| dt.with_timezone(&chrono::Utc));
+        // Severity is populated from the sidecar CVSS index in the async callers to avoid blocking IO here
+        let severity = None;
+
+        // Published date not available from Cve-only record
+        let published_at = None;
 
         RawVulnerability {
-            id: nvd_cve.id,
-            summary: description.clone(), // NVD doesn't separate summary from description
+            id,
+            summary: description.clone(),
             description,
             severity,
             references,
             published_at,
-            affected: vec![], // TODO: Extract affected packages from NVD data
+            affected: vec![], // Not extracted from NVD CPE data in this phase
         }
+    }
+
+    /// Try to parse a base score (CVSS) from the `impact` JSON object.
+    /// Prefers v3 over v2 when both are present.
+    #[allow(dead_code)]
+    fn extract_base_score_from_impact(impact: &Value) -> Option<f64> {
+        // NVD 1.1 frequently uses "baseMetricV3" and "baseMetricV2"
+        impact
+            .get("baseMetricV3")
+            .and_then(|v| v.get("cvssV3"))
+            .and_then(|v| v.get("baseScore"))
+            .and_then(|v| v.as_f64())
+            .or_else(|| {
+                impact
+                    .get("baseMetricV2")
+                    .and_then(|v| v.get("cvssV2"))
+                    .and_then(|v| v.get("baseScore"))
+                    .and_then(|v| v.as_f64())
+            })
+    }
+
+    #[allow(dead_code)]
+    // Load CVSS base score for a CVE from the sidecar index file
+    fn load_cvss_score(&self, id: &str) -> Option<f64> {
+        let data = fs::read_to_string(&self.cvss_index_path).ok()?;
+        let map: HashMap<String, f64> = serde_json::from_str(&data).ok()?;
+        map.get(id).copied()
+    }
+
+    // Load the full CVSS sidecar index asynchronously (avoid blocking IO on async paths)
+    async fn load_cvss_index_async(&self) -> Option<HashMap<String, f64>> {
+        let data = tokio::fs::read(&self.cvss_index_path).await.ok()?;
+        serde_json::from_slice::<HashMap<String, f64>>(&data).ok()
+    }
+
+    // Fetch CVSS base score via NVD REST (v2.0) if API key available; returns best score if found
+    pub(crate) async fn fetch_cvss_base_score_via_rest(&self, cve_id: &str) -> Option<f64> {
+        let base = self.rest_base_url.trim_end_matches('/');
+        let url = format!("{}/cves/2.0?cveId={}", base, cve_id);
+
+        let client = reqwest::Client::new();
+        let mut req = client.get(url);
+        if let Some(key) = &self.api_key {
+            req = req.header("apiKey", key);
+        }
+
+        let resp = req.send().await.ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        let json: serde_json::Value = resp.json().await.ok()?;
+
+        let items = json.get("vulnerabilities").and_then(|v| v.as_array())?;
+        for item in items {
+            let cve = item.get("cve").unwrap_or(item);
+            if let Some(metrics) = cve.get("metrics") {
+                // CVSS v3.1
+                if let Some(v) = metrics
+                    .get("cvssMetricV31")
+                    .and_then(|a| a.as_array())
+                    .and_then(|a| a.first())
+                    .and_then(|m| m.get("cvssData"))
+                    .and_then(|d| d.get("baseScore"))
+                    .and_then(|s| s.as_f64())
+                {
+                    return Some(v);
+                }
+                // CVSS v3.0
+                if let Some(v) = metrics
+                    .get("cvssMetricV30")
+                    .and_then(|a| a.as_array())
+                    .and_then(|a| a.first())
+                    .and_then(|m| m.get("cvssData"))
+                    .and_then(|d| d.get("baseScore"))
+                    .and_then(|s| s.as_f64())
+                {
+                    return Some(v);
+                }
+                // CVSS v2.0 (sometimes baseScore is nested or at the metric level)
+                if let Some(v) = metrics
+                    .get("cvssMetricV2")
+                    .and_then(|a| a.as_array())
+                    .and_then(|a| a.first())
+                    .and_then(|m| {
+                        m.get("cvssData")
+                            .and_then(|d| d.get("baseScore"))
+                            .or_else(|| m.get("baseScore"))
+                    })
+                    .and_then(|s| s.as_f64())
+                {
+                    return Some(v);
+                }
+            }
+        }
+        None
+    }
+
+    // Persist a single CVSS score into the sidecar index asynchronously (best-effort)
+    async fn upsert_cvss_index_entry_async(&self, cve_id: &str, score: f64) {
+        if let Some(mut map) = self.load_cvss_index_async().await {
+            map.insert(cve_id.to_string(), score);
+            if let Ok(json) = serde_json::to_vec(&map) {
+                let _ = tokio::fs::write(&self.cvss_index_path, json).await;
+            }
+        } else {
+            // Create a fresh index when missing/corrupt
+            let mut map = HashMap::new();
+            map.insert(cve_id.to_string(), score);
+            if let Ok(json) = serde_json::to_vec(&map) {
+                let _ = tokio::fs::write(&self.cvss_index_path, json).await;
+            }
+        }
+    }
+
+    // Regenerate the sidecar CVSS index by walking current feeds and extracting CVSS from impact
+
+    async fn regenerate_cvss_index(&self, cfg: &CacheConfig) -> Result<(), VulnerabilityError> {
+        let url = cfg.url.clone();
+        let feeds = cfg.feeds.clone();
+        let index_path = self.cvss_index_path.clone();
+
+        let res = task::spawn_blocking(move || {
+            let client = <ReqwestBlockingClient as BlockingHttpClient>::new(&url, None, None, None);
+            let mut map: HashMap<String, f64> = HashMap::new();
+
+            for feed in feeds {
+                if let Ok(cve_feed) = CveFeed::from_blocking_http_client(&client, &feed) {
+                    for item in cve_feed.cve_items {
+                        if let Some(score) = NvdClient::extract_base_score_from_impact(&item.impact)
+                        {
+                            map.insert(item.cve.cve_data_meta.id.clone(), score);
+                        }
+                    }
+                }
+            }
+
+            if let Some(parent) = index_path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            let json = serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string());
+            fs::write(index_path, json)
+                .map_err(|e| format!("Failed to write CVSS index: {}", e))?;
+            Ok::<(), String>(())
+        })
+        .await;
+
+        match res {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(VulnerabilityError::Api(ApiError::Http {
+                status: 500,
+                message: e,
+            })),
+            Err(join_err) => Err(VulnerabilityError::Api(ApiError::Http {
+                status: 500,
+                message: format!("CVSS index task error: {}", join_err),
+            })),
+        }
+    }
+    #[allow(dead_code)]
+    // Force a sync now (optionally with force_update), to be used in future admin endpoints
+    async fn sync_now(&self, force_update: bool) -> Result<(), VulnerabilityError> {
+        // Build a config snapshot for this sync
+        let mut cfg = self.build_cache_config();
+        cfg.force_update = force_update;
+
+        // Extract values we need inside the blocking task
+        let url = cfg.url.clone();
+        let feeds = cfg.feeds.clone();
+        let db = cfg.db.clone();
+        let show_progress = cfg.show_progress;
+        let force_update_val = cfg.force_update;
+
+        // Perform sync using an internal local config to avoid moving `cfg`
+        let res = task::spawn_blocking(move || {
+            let mut cfg_local = CacheConfig::new();
+            cfg_local.url = url;
+            cfg_local.feeds = feeds;
+            cfg_local.db = db;
+            cfg_local.show_progress = show_progress;
+            cfg_local.force_update = force_update_val;
+
+            let client = <ReqwestBlockingClient as BlockingHttpClient>::new(
+                &cfg_local.url,
+                None,
+                None,
+                None,
+            );
+            sync_blocking(&cfg_local, client)
+        })
+        .await;
+
+        // After sync completes, rebuild CVSS index using a fresh config snapshot
+        match res {
+            Ok(Ok(())) => {
+                let cfg2 = self.build_cache_config();
+                self.regenerate_cvss_index(&cfg2).await
+            }
+            Ok(Err(err)) => Err(VulnerabilityError::Api(ApiError::Http {
+                status: 500,
+                message: format!("NVD local cache sync failed: {:?}", err),
+            })),
+            Err(join_err) => Err(VulnerabilityError::Api(ApiError::Http {
+                status: 500,
+                message: format!("NVD local cache sync join error: {}", join_err),
+            })),
+        }
+    }
+
+    /// Determine sync interval from env var VULNERA__CACHE__TTL_HOURS (default 24 hours)
+    fn sync_interval() -> Duration {
+        let hours = std::env::var("VULNERA__CACHE__TTL_HOURS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|h| *h > 0)
+            .unwrap_or(24);
+        Duration::from_secs(hours * 3600)
+    }
+
+    // Start a periodic background task to refresh the local DB and CVSS index
+    fn start_periodic_sync(&self) {
+        // Disable in tests to avoid background tasks and port usage
+        if cfg!(test) {
+            tracing::info!("NVD periodic sync disabled in tests");
+            return;
+        }
+        // Optional enable flag: VULNERA__NVD__ENABLE_PERIODIC_SYNC=true|false (default true)
+        let enabled = std::env::var("VULNERA__NVD__ENABLE_PERIODIC_SYNC")
+            .ok()
+            .map(|v| v.to_lowercase())
+            .map(|v| v == "1" || v == "true" || v == "yes")
+            .unwrap_or(true);
+        if !enabled {
+            tracing::info!("NVD periodic sync disabled via VULNERA__NVD__ENABLE_PERIODIC_SYNC");
+            return;
+        }
+
+        let feed_base_url = self.feed_base_url.clone();
+        let db_path = self.db_path.clone();
+        let feeds = self.feeds.clone();
+        let index_path = self.cvss_index_path.clone();
+
+        tokio::spawn(async move {
+            loop {
+                // Build config and force a refresh
+                let mut cfg = CacheConfig::new();
+                cfg.url = feed_base_url.clone();
+                cfg.feeds = feeds.clone();
+                cfg.db = db_path.to_string_lossy().to_string();
+                cfg.show_progress = false;
+                cfg.force_update = true;
+
+                // Prepare clones for both sync and index before moving into closures
+                let url_sync = cfg.url.clone();
+                let feeds_sync = cfg.feeds.clone();
+                let db_sync = cfg.db.clone();
+                let show_progress_sync = cfg.show_progress;
+                let force_update_sync = cfg.force_update;
+
+                // Run sync using a local CacheConfig to avoid moving `cfg`
+                let _ = task::spawn_blocking(move || {
+                    let mut cfg_local = CacheConfig::new();
+                    cfg_local.url = url_sync;
+                    cfg_local.feeds = feeds_sync;
+                    cfg_local.db = db_sync;
+                    cfg_local.show_progress = show_progress_sync;
+                    cfg_local.force_update = force_update_sync;
+
+                    let client = <ReqwestBlockingClient as BlockingHttpClient>::new(
+                        &cfg_local.url,
+                        None,
+                        None,
+                        None,
+                    );
+                    sync_blocking(&cfg_local, client)
+                })
+                .await;
+
+                // Rebuild CVSS index (use pre-cloned values from cfg)
+                let url2 = cfg.url.clone();
+                let feeds2 = cfg.feeds.clone();
+                let index2 = index_path.clone();
+                let _ = task::spawn_blocking(move || {
+                    let client =
+                        <ReqwestBlockingClient as BlockingHttpClient>::new(&url2, None, None, None);
+                    let mut map: HashMap<String, f64> = HashMap::new();
+                    for feed in feeds2 {
+                        if let Ok(cve_feed) = CveFeed::from_blocking_http_client(&client, &feed) {
+                            for item in cve_feed.cve_items {
+                                if let Some(score) =
+                                    NvdClient::extract_base_score_from_impact(&item.impact)
+                                {
+                                    map.insert(item.cve.cve_data_meta.id.clone(), score);
+                                }
+                            }
+                        }
+                    }
+                    if let Some(parent) = index2.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    let json = serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string());
+                    let _ = fs::write(index2, json);
+                    Ok::<(), ()>(())
+                })
+                .await;
+
+                // Sleep for configured interval (default from VULNERA__CACHE__TTL_HOURS or 24h)
+                sleep(Self::sync_interval()).await;
+            }
+        });
     }
 }
 
@@ -404,397 +543,208 @@ impl VulnerabilityApiClient for NvdClient {
         &self,
         package: &Package,
     ) -> Result<Vec<RawVulnerability>, VulnerabilityError> {
-        // Search for vulnerabilities using package name as keyword
-        self.search_cves(&package.name).await
+        self.ensure_synced().await?;
+
+        let cfg = self.build_cache_config();
+        let name = package.name.clone();
+
+        // Execute blocking sqlite queries on a blocking thread
+        let cves = task::spawn_blocking(move || {
+            // 1) search in descriptions for the package name -> CVE IDs
+            let ids = search_description(&cfg, &name).unwrap_or_default();
+
+            // 2) fetch each CVE and return Cve objects
+            let mut out = Vec::with_capacity(ids.len());
+            for id in ids {
+                if let Ok(c) = search_by_id(&cfg, &id) {
+                    out.push(c);
+                }
+            }
+            out
+        })
+        .await
+        .map_err(|e| {
+            VulnerabilityError::Api(ApiError::Http {
+                status: 500,
+                message: format!("NVD local search join error: {}", e),
+            })
+        })?;
+
+        // removed unused cvss_index preload
+        // Convert CVEs to raw vulns
+        let mut res: Vec<RawVulnerability> = cves
+            .into_iter()
+            .map(|c| self.convert_cve_to_raw(c))
+            .collect();
+
+        // Enrich severity from local CVSS sidecar index
+        if let Some(index) = self.load_cvss_index_async().await {
+            for v in &mut res {
+                if v.severity.is_none() {
+                    if let Some(score) = index.get(&v.id) {
+                        v.severity = Some(score.to_string());
+                    }
+                }
+            }
+        }
+
+        // If still missing and API key is available, enrich via NVD REST (best-effort)
+        if self.api_key.is_some() {
+            for v in &mut res {
+                if v.severity.is_none() {
+                    if let Some(score) = self.fetch_cvss_base_score_via_rest(&v.id).await {
+                        v.severity = Some(score.to_string());
+                        // Persist to sidecar for future lookups
+                        self.upsert_cvss_index_entry_async(&v.id, score).await;
+                    }
+                }
+            }
+        }
+
+        Ok(res)
     }
 
     async fn get_vulnerability_details(
         &self,
         id: &str,
     ) -> Result<Option<RawVulnerability>, VulnerabilityError> {
-        self.rate_limiter.wait_for_request().await?;
-        let url = format!("{}/cves/2.0", self.base_url);
-        let mut request = self.client.get(&url).query(&[("cveId", id)]);
+        self.ensure_synced().await?;
 
-        // Add API key if available
-        if let Some(ref api_key) = self.api_key {
-            request = request.header("apiKey", api_key);
-        }
+        let cfg = self.build_cache_config();
+        let id = id.to_string();
 
-        let response = self.execute_with_retry(request).await?;
+        let res = task::spawn_blocking(move || search_by_id(&cfg, &id))
+            .await
+            .map_err(|e| {
+                VulnerabilityError::Api(ApiError::Http {
+                    status: 500,
+                    message: format!("NVD local fetch join error: {}", e),
+                })
+            })?;
 
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Ok(None);
-        }
-
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(VulnerabilityError::Api(ApiError::Http {
-                status,
-                message: format!("NVD API error: {}", error_text),
-            }));
-        }
-
-        let nvd_response: NvdSearchResponse = response.json().await?;
-
-        if let Some(wrapper) = nvd_response.vulnerabilities.into_iter().next() {
-            let vulnerability = Self::convert_nvd_vulnerability(wrapper.cve);
-            Ok(Some(vulnerability))
-        } else {
-            Ok(None)
+        let cvss_index = self.load_cvss_index_async().await;
+        match res {
+            Ok(c) => {
+                let mut v = self.convert_cve_to_raw(c);
+                if let Some(index) = cvss_index.as_ref() {
+                    if v.severity.is_none() {
+                        if let Some(score) = index.get(&v.id) {
+                            v.severity = Some(score.to_string());
+                        }
+                    }
+                }
+                Ok(Some(v))
+            }
+            Err(_e) => {
+                // Not found or DB error. Treat as not-found to align with previous contract.
+                Ok(None)
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::domain::{Ecosystem, Version};
-    use mockito::Server;
-    use serde_json::json;
-
-    fn create_test_package() -> Package {
-        Package::new(
-            "express".to_string(),
-            Version::parse("4.17.1").unwrap(),
-            Ecosystem::Npm,
-        )
-        .unwrap()
-    }
+    use super::NvdClient;
+    use mockito::{Matcher, Server};
 
     #[tokio::test]
-    async fn test_rate_limiter_without_api_key() {
-        let rate_limiter = RateLimiter::without_api_key();
-
-        // Should allow 5 requests quickly
-        for _ in 0..5 {
-            let result = rate_limiter.wait_for_request().await;
-            assert!(result.is_ok());
-        }
-
-        // The 6th request should be delayed, but i won't wait for it in the test
-        // I will just use it to verify the rate limiter structure is correct
-        assert_eq!(rate_limiter.max_requests, 5);
-        assert_eq!(rate_limiter.window_seconds, 30);
-    }
-
-    #[tokio::test]
-    async fn test_rate_limiter_with_api_key() {
-        let rate_limiter = RateLimiter::with_api_key();
-
-        assert_eq!(rate_limiter.max_requests, 50);
-        assert_eq!(rate_limiter.window_seconds, 30);
-    }
-
-    #[tokio::test]
-    async fn test_search_cves_success() {
+    async fn test_fetch_cvss_v31_parsing() {
         let mut server = Server::new_async().await;
-
-        let mock_response = json!({
-            "vulnerabilities": [
-                {
-                    "cve": {
-                        "id": "CVE-2022-24999",
-                        "sourceIdentifier": "cve@mitre.org",
-                        "published": "2022-01-01T00:00:00.000Z",
-                        "lastModified": "2022-01-02T00:00:00.000Z",
-                        "vulnStatus": "Analyzed",
-                        "descriptions": [
-                            {
-                                "lang": "en",
-                                "value": "A test vulnerability for unit testing"
-                            }
-                        ],
-                        "metrics": {
-                            "cvssMetricV31": [
-                                {
-                                    "source": "nvd@nist.gov",
-                                    "type": "Primary",
-                                    "cvssData": {
-                                        "version": "3.1",
-                                        "baseScore": 7.5,
-                                        "baseSeverity": "HIGH"
-                                    }
-                                }
-                            ]
-                        },
-                        "references": [
-                            {
-                                "url": "https://example.com/advisory",
-                                "source": "example.com"
-                            }
-                        ]
-                    }
+        let cve_id = "CVE-2024-0001";
+        let body = r#"{
+          "vulnerabilities": [
+            {
+              "cve": {
+                "metrics": {
+                  "cvssMetricV31": [
+                    { "cvssData": { "baseScore": 9.8 } }
+                  ]
                 }
-            ],
-            "totalResults": 1
-        });
+              }
+            }
+          ]
+        }"#;
 
-        let mock = server
-            .mock("GET", "/cves/2.0")
-            .match_query(mockito::Matcher::AllOf(vec![
-                mockito::Matcher::UrlEncoded("keywordSearch".into(), "express".into()),
-                mockito::Matcher::UrlEncoded("resultsPerPage".into(), "50".into()),
-            ]))
+        let _m = server
+            .mock("GET", "/rest/json/cves/2.0")
+            .match_query(Matcher::UrlEncoded("cveId".into(), cve_id.into()))
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(mock_response.to_string())
-            .expect(1)
-            .create_async()
-            .await;
+            .with_body(body)
+            .create();
 
-        let client = NvdClient::new(server.url(), None);
+        let base = format!("{}/rest/json", server.url());
+        let client = NvdClient::new(base, Some("dummy-key".to_string()));
 
-        let result = client.search_cves("express").await;
-
-        mock.assert_async().await;
-        assert!(result.is_ok());
-
-        let vulnerabilities = result.unwrap();
-        assert_eq!(vulnerabilities.len(), 1);
-
-        let vuln = &vulnerabilities[0];
-        assert_eq!(vuln.id, "CVE-2022-24999");
-        assert_eq!(vuln.description, "A test vulnerability for unit testing");
-        assert_eq!(vuln.severity, Some("7.5".to_string()));
-        assert_eq!(vuln.references.len(), 1);
-        assert!(vuln.published_at.is_some());
+        let score = client.fetch_cvss_base_score_via_rest(cve_id).await;
+        assert_eq!(score, Some(9.8));
     }
 
     #[tokio::test]
-    async fn test_search_cves_empty_response() {
+    async fn test_fetch_cvss_v30_parsing() {
         let mut server = Server::new_async().await;
-
-        let mock_response = json!({
-            "vulnerabilities": [],
-            "totalResults": 0
-        });
-
-        let mock = server
-            .mock("GET", "/cves/2.0")
-            .match_query(mockito::Matcher::AllOf(vec![
-                mockito::Matcher::UrlEncoded("keywordSearch".into(), "nonexistent".into()),
-                mockito::Matcher::UrlEncoded("resultsPerPage".into(), "50".into()),
-            ]))
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(mock_response.to_string())
-            .expect(1)
-            .create_async()
-            .await;
-
-        let client = NvdClient::new(server.url(), None);
-
-        let result = client.search_cves("nonexistent").await;
-
-        mock.assert_async().await;
-        assert!(result.is_ok());
-
-        let vulnerabilities = result.unwrap();
-        assert_eq!(vulnerabilities.len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_get_vulnerability_details_success() {
-        let mut server = Server::new_async().await;
-
-        let mock_response = json!({
-            "vulnerabilities": [
-                {
-                    "cve": {
-                        "id": "CVE-2022-24999",
-                        "descriptions": [
-                            {
-                                "lang": "en",
-                                "value": "A test vulnerability for unit testing"
-                            }
-            ],
-                        "metrics": {
-                            "cvssMetricV31": [
-                                {
-                                    "source": "nvd@nist.gov",
-                                    "type": "Primary",
-                                    "cvssData": {
-                                        "version": "3.1",
-                                        "baseScore": 7.5,
-                                        "baseSeverity": "HIGH"
-                               }
-                                }
-                            ]
-                        },
-                        "references": [
-                            {
-                                "url": "https://example.com/advisory"
-                            }
-                        ],
-                        "published": "2022-01-01T00:00:00.000Z"
-                    }
+        let cve_id = "CVE-2024-0002";
+        let body = r#"{
+          "vulnerabilities": [
+            {
+              "cve": {
+                "metrics": {
+                  "cvssMetricV30": [
+                    { "cvssData": { "baseScore": 8.1 } }
+                  ]
                 }
-            ],
-            "totalResults": 1
-        });
+              }
+            }
+          ]
+        }"#;
 
-        let mock = server
-            .mock("GET", "/cves/2.0")
-            .match_query(mockito::Matcher::UrlEncoded(
-                "cveId".into(),
-                "CVE-2022-24999".into(),
-            ))
+        let _m = server
+            .mock("GET", "/rest/json/cves/2.0")
+            .match_query(Matcher::UrlEncoded("cveId".into(), cve_id.into()))
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(mock_response.to_string())
-            .expect(1)
-            .create_async()
-            .await;
+            .with_body(body)
+            .create();
 
-        let client = NvdClient::new(server.url(), None);
+        let base = format!("{}/rest/json", server.url());
+        let client = NvdClient::new(base, Some("dummy-key".to_string()));
 
-        let result = client.get_vulnerability_details("CVE-2022-24999").await;
-
-        mock.assert_async().await;
-        assert!(result.is_ok());
-
-        let vulnerability = result.unwrap();
-        assert!(vulnerability.is_some());
-
-        let vuln = vulnerability.unwrap();
-        assert_eq!(vuln.id, "CVE-2022-24999");
-        assert_eq!(vuln.description, "A test vulnerability for unit testing");
-        assert_eq!(vuln.severity, Some("7.5".to_string()));
+        let score = client.fetch_cvss_base_score_via_rest(cve_id).await;
+        assert_eq!(score, Some(8.1));
     }
 
     #[tokio::test]
-    async fn test_get_vulnerability_details_not_found() {
+    async fn test_fetch_cvss_v2_parsing() {
         let mut server = Server::new_async().await;
-
-        let mock_response = json!({
-            "vulnerabilities": [],
-            "totalResults": 0
-        });
-
-        let mock = server
-            .mock("GET", "/cves/2.0")
-            .match_query(mockito::Matcher::UrlEncoded(
-                "cveId".into(),
-                "CVE-NONEXISTENT".into(),
-            ))
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(mock_response.to_string())
-            .expect(1)
-            .create_async()
-            .await;
-
-        let client = NvdClient::new(server.url(), None);
-
-        let result = client.get_vulnerability_details("CVE-NONEXISTENT").await;
-
-        mock.assert_async().await;
-        assert!(result.is_ok());
-
-        let vulnerability = result.unwrap();
-        assert!(vulnerability.is_none());
-    }
-
-    #[tokio::test]
-    async fn test_query_vulnerabilities_via_trait() {
-        let mut server = Server::new_async().await;
-
-        let mock_response = json!({
-            "vulnerabilities": [
-                {
-                    "cve": {
-                        "id": "CVE-2022-24999",
-                        "descriptions": [
-                            {
-                                "lang": "en",
-                                "value": "Express vulnerability"
-                            }
-                        ]
-                    }
+        let cve_id = "CVE-2024-0003";
+        // Base score may be nested under cvssData or directly under the metric object; test nested variant
+        let body = r#"{
+          "vulnerabilities": [
+            {
+              "cve": {
+                "metrics": {
+                  "cvssMetricV2": [
+                    { "cvssData": { "baseScore": 5.0 } }
+                  ]
                 }
-            ],
-            "totalResults": 1
-        });
+              }
+            }
+          ]
+        }"#;
 
-        let mock = server
-            .mock("GET", "/cves/2.0")
-            .match_query(mockito::Matcher::AllOf(vec![
-                mockito::Matcher::UrlEncoded("keywordSearch".into(), "express".into()),
-                mockito::Matcher::UrlEncoded("resultsPerPage".into(), "50".into()),
-            ]))
+        let _m = server
+            .mock("GET", "/rest/json/cves/2.0")
+            .match_query(Matcher::UrlEncoded("cveId".into(), cve_id.into()))
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(mock_response.to_string())
-            .expect(1)
-            .create_async()
-            .await;
+            .with_body(body)
+            .create();
 
-        let client = NvdClient::new(server.url(), None);
-        let package = create_test_package();
+        let base = format!("{}/rest/json", server.url());
+        let client = NvdClient::new(base, Some("dummy-key".to_string()));
 
-        let result = client.query_vulnerabilities(&package).await;
-
-        mock.assert_async().await;
-        assert!(result.is_ok());
-
-        let vulnerabilities = result.unwrap();
-        assert_eq!(vulnerabilities.len(), 1);
-        assert_eq!(vulnerabilities[0].id, "CVE-2022-24999");
-    }
-
-    #[tokio::test]
-    async fn test_client_with_api_key() {
-        let client = NvdClient::with_api_key("test-api-key".to_string());
-        assert_eq!(client.api_key, Some("test-api-key".to_string()));
-        assert_eq!(client.rate_limiter.max_requests, 50); // With API key
-    }
-
-    #[tokio::test]
-    async fn test_client_without_api_key() {
-        let client = NvdClient::default();
-        assert_eq!(client.api_key, None);
-        assert_eq!(client.rate_limiter.max_requests, 5); // Without API key
-    }
-
-    #[test]
-    fn test_convert_nvd_vulnerability() {
-        let nvd_cve = NvdCve {
-            id: "CVE-2022-24999".to_string(),
-            source_identifier: Some("cve@mitre.org".to_string()),
-            published: Some("2022-01-01T00:00:00.000Z".to_string()),
-            last_modified: Some("2022-01-02T00:00:00.000".to_string()),
-            vuln_status: Some("Analyzed".to_string()),
-            descriptions: Some(vec![NvdDescription {
-                lang: "en".to_string(),
-                value: "Test vulnerability".to_string(),
-            }]),
-            metrics: Some(NvdMetrics {
-                cvss_v31: Some(vec![NvdCvssMetric {
-                    source: "nvd@nist.gov".to_string(),
-                    metric_type: "Primary".to_string(),
-                    cvss_data: NvdCvssData {
-                        version: "3.1".to_string(),
-                        base_score: 7.5,
-                        base_severity: "HIGH".to_string(),
-                    },
-                }]),
-                cvss_v30: None,
-                cvss_v2: None,
-            }),
-            references: Some(vec![NvdReference {
-                url: "https://example.com".to_string(),
-                source: Some("example.com".to_string()),
-            }]),
-        };
-
-        let raw_vuln = NvdClient::convert_nvd_vulnerability(nvd_cve);
-
-        assert_eq!(raw_vuln.id, "CVE-2022-24999");
-        assert_eq!(raw_vuln.description, "Test vulnerability");
-        assert_eq!(raw_vuln.severity, Some("7.5".to_string()));
-        assert_eq!(raw_vuln.references.len(), 1);
-        assert!(raw_vuln.published_at.is_some());
+        let score = client.fetch_cvss_base_score_via_rest(cve_id).await;
+        assert_eq!(score, Some(5.0));
     }
 }

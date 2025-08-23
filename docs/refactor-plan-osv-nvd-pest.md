@@ -283,7 +283,7 @@ Phase 1: OSV Adapter Swap
 Phase 2: NVD Local Adapter
 
 - Replace internals of `infrastructure/api_clients/nvd.rs` to use `nvd_cve`.
-- Add configuration for local dataset location; add a developer Make target to update the dataset locally.
+- Add configuration for local dataset location; add a env variable to set the duration of the data set auto update.
 
 Phase 3: Pest Parsers (Priority Formats)
 
