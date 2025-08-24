@@ -734,8 +734,11 @@ pub async fn list_vulnerabilities(
         has_prev: page > 1,
     };
 
+    let cache_status = result.cache_status.clone();
     let response = VulnerabilityListResponse {
         vulnerabilities,
+        total_count: result.total_count,
+        cache_status: result.cache_status,
         pagination: pagination_dto,
     };
 
@@ -745,7 +748,7 @@ pub async fn list_vulnerabilities(
         page,
         total_pages,
         result.total_count,
-        result.cache_status
+        cache_status
     );
 
     Ok(Json(response))
@@ -901,4 +904,131 @@ pub async fn get_analysis_report(
             id: id.to_string(),
         })
     }
+}
+
+/// Query parameters for popular packages endpoint
+#[derive(Deserialize)]
+pub struct PopularPackagesQuery {
+    pub ecosystem: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+/// Get popular packages with known vulnerabilities
+#[utoipa::path(
+    get,
+    path = "/api/v1/popular",
+    tag = "analysis",
+    params(
+        ("ecosystem" = Option<String>, Query, description = "Filter by ecosystem (npm, pypi, cargo, maven, go, packagist)"),
+        ("limit" = Option<u32>, Query, description = "Maximum number of packages to return (default: 50, max: 500)"),
+        ("offset" = Option<u32>, Query, description = "Number of packages to skip (default: 0)")
+    ),
+    responses(
+        (status = 200, description = "Popular packages with vulnerabilities", body = VulnerabilityListResponse),
+        (status = 400, description = "Invalid query parameters", body = ErrorResponse),
+        (status = 422, description = "Validation error", body = ErrorResponse)
+    )
+)]
+pub async fn get_popular_packages(
+    State(app_state): State<AppState>,
+    Query(query): Query<PopularPackagesQuery>,
+) -> Result<Json<VulnerabilityListResponse>, ApplicationError> {
+    tracing::info!("Fetching popular packages with vulnerabilities");
+
+    // Validate parameters
+    let limit = query.limit.unwrap_or(50).min(500).max(1);
+    let offset = query.offset.unwrap_or(0);
+
+    // Validate ecosystem if provided
+    if let Some(ref ecosystem_str) = query.ecosystem {
+        let _ecosystem = match ecosystem_str.to_lowercase().as_str() {
+            "npm" => Ecosystem::Npm,
+            "pypi" => Ecosystem::PyPI,
+            "cargo" => Ecosystem::Cargo,
+            "maven" => Ecosystem::Maven,
+            "go" => Ecosystem::Go,
+            "packagist" => Ecosystem::Packagist,
+            _ => {
+                return Err(ApplicationError::Domain(
+                    crate::domain::DomainError::InvalidInput {
+                        field: "ecosystem".to_string(),
+                        message: format!("Unsupported ecosystem: {}", ecosystem_str),
+                    },
+                ));
+            }
+        };
+    }
+
+    // Calculate page from offset and limit
+    let page = (offset / limit) + 1;
+
+    // Use the popular package service to get popular packages
+    let result = app_state
+        .popular_package_service
+        .list_vulnerabilities(
+            page,
+            limit,
+            query.ecosystem.as_deref(),
+            None, // severity filter not provided in this endpoint
+        )
+        .await?;
+
+    // Convert to DTOs
+    let vulnerabilities: Vec<VulnerabilityDto> = result
+        .vulnerabilities
+        .into_iter()
+        .map(|v| VulnerabilityDto {
+            id: v.id.to_string(),
+            summary: v.summary,
+            description: v.description,
+            severity: v.severity.to_string(),
+            affected_packages: v
+                .affected_packages
+                .into_iter()
+                .map(|ap| AffectedPackageDto {
+                    name: ap.package.name,
+                    version: ap.package.version.to_string(),
+                    ecosystem: ap.package.ecosystem.to_string(),
+                    vulnerable_ranges: ap
+                        .vulnerable_ranges
+                        .into_iter()
+                        .map(|v| v.to_string())
+                        .collect(),
+                    fixed_versions: ap
+                        .fixed_versions
+                        .into_iter()
+                        .map(|v| v.to_string())
+                        .collect(),
+                })
+                .collect(),
+            references: v.references,
+            published_at: v.published_at,
+            sources: v.sources.into_iter().map(|s| format!("{:?}", s)).collect(),
+        })
+        .collect();
+
+    // Create pagination info
+    let pagination = PaginationDto {
+        page: (offset / limit) + 1,
+        per_page: limit,
+        total: result.total_count,
+        total_pages: ((result.total_count as f64) / (limit as f64)).ceil() as u32,
+        has_next: (offset as u64 + limit as u64) < result.total_count,
+        has_prev: offset > 0,
+    };
+
+    let response = VulnerabilityListResponse {
+        vulnerabilities,
+        total_count: result.total_count,
+        cache_status: result.cache_status,
+        pagination,
+    };
+
+    tracing::info!(
+        "Retrieved {} popular packages with vulnerabilities",
+        response.vulnerabilities.len()
+    );
+
+    Ok(Json(response))
 }

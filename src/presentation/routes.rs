@@ -18,8 +18,8 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::presentation::{
     controllers::{
         analysis::{
-            AppState, analyze_dependencies, get_analysis_report, get_vulnerability,
-            list_vulnerabilities, refresh_vulnerability_cache,
+            AppState, analyze_dependencies, get_analysis_report, get_popular_packages,
+            get_vulnerability, list_vulnerabilities, refresh_vulnerability_cache,
         },
         health::{health_check, metrics},
     },
@@ -44,7 +44,9 @@ use axum::{
         crate::presentation::controllers::analysis::list_vulnerabilities,
         crate::presentation::controllers::analysis::refresh_vulnerability_cache,
         crate::presentation::controllers::analysis::get_analysis_report,
+        crate::presentation::controllers::analysis::get_popular_packages,
         crate::presentation::controllers::health::health_check,
+
         crate::presentation::controllers::health::metrics
     ),
     components(
@@ -109,7 +111,8 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
             post(refresh_vulnerability_cache),
         )
         .route("/vulnerabilities/{id}", get(get_vulnerability))
-        .route("/reports/{id}", get(get_analysis_report));
+        .route("/reports/{id}", get(get_analysis_report))
+        .route("/popular", get(get_popular_packages));
 
     let health_routes = Router::new()
         .route("/health", get(health_check))

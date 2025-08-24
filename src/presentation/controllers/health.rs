@@ -2,8 +2,6 @@
 
 use axum::{extract::State, http::StatusCode, response::Json};
 use chrono::Utc;
-use serde_json::json;
-use std::time::Instant;
 
 use crate::presentation::controllers::AppState;
 use crate::presentation::models::HealthResponse;
@@ -24,131 +22,6 @@ pub async fn health_check(State(_app_state): State<AppState>) -> Json<HealthResp
         timestamp: Utc::now(),
         details: None,
     })
-}
-
-/// Detailed health check endpoint for readiness probe
-#[utoipa::path(
-    get,
-    path = "/health/detailed",
-    tag = "health",
-    responses(
-        (status = 200, description = "Detailed health information", body = HealthResponse),
-        (status = 503, description = "Service is unhealthy", body = HealthResponse)
-    )
-)]
-pub async fn detailed_health_check(
-    State(app_state): State<AppState>,
-) -> Result<Json<HealthResponse>, (StatusCode, Json<HealthResponse>)> {
-    let start_time = Instant::now();
-    let mut overall_status = "healthy";
-    let mut dependency_statuses = serde_json::Map::new();
-
-    // Check cache service health
-    let cache_status = check_cache_health(&app_state).await;
-    dependency_statuses.insert("cache".to_string(), json!(cache_status));
-    if cache_status.status != "healthy" {
-        overall_status = "degraded";
-    }
-
-    // Check external API connectivity (placeholder for now)
-    let api_statuses = check_external_apis().await;
-    dependency_statuses.insert("external_apis".to_string(), json!(api_statuses));
-
-    // Get cache statistics
-    if let Ok(cache_stats) = app_state.cache_service.get_cache_statistics().await {
-        dependency_statuses.insert(
-            "cache_statistics".to_string(),
-            json!({
-                "hit_rate": cache_stats.hit_rate,
-                "total_entries": cache_stats.total_entries,
-                "total_size_bytes": cache_stats.total_size_bytes
-            }),
-        );
-    }
-
-    let check_duration = start_time.elapsed();
-    let response = HealthResponse {
-        status: overall_status.to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        timestamp: Utc::now(),
-        details: Some(json!({
-            "dependencies": dependency_statuses,
-            "check_duration_ms": check_duration.as_millis(),
-            "uptime": "N/A", // Would be calculated from service start time
-            "build_info": {
-                "version": env!("CARGO_PKG_VERSION"),
-                "build_date": option_env!("VERGEN_BUILD_DATE").unwrap_or("unknown"),
-                "git_sha": option_env!("VERGEN_GIT_SHA").unwrap_or("unknown")
-            }
-        })),
-    };
-
-    if overall_status == "healthy" {
-        Ok(Json(response))
-    } else {
-        Err((StatusCode::SERVICE_UNAVAILABLE, Json(response)))
-    }
-}
-
-/// Check cache service health
-async fn check_cache_health(app_state: &AppState) -> HealthCheckResult {
-    match app_state.cache_service.get_cache_statistics().await {
-        Ok(_) => HealthCheckResult {
-            status: "healthy".to_string(),
-            message: "Cache service is operational".to_string(),
-            last_check: Utc::now(),
-        },
-        Err(e) => HealthCheckResult {
-            status: "unhealthy".to_string(),
-            message: format!("Cache service error: {}", e),
-            last_check: Utc::now(),
-        },
-    }
-}
-
-/// Check external API connectivity
-async fn check_external_apis() -> serde_json::Map<String, serde_json::Value> {
-    let mut api_statuses = serde_json::Map::new();
-
-    // OSV API check (placeholder)
-    api_statuses.insert(
-        "osv_api".to_string(),
-        json!({
-            "status": "healthy",
-            "message": "API connectivity not implemented yet",
-            "last_check": Utc::now()
-        }),
-    );
-
-    // NVD API check (placeholder)
-    api_statuses.insert(
-        "nvd_api".to_string(),
-        json!({
-            "status": "healthy",
-            "message": "API connectivity not implemented yet",
-            "last_check": Utc::now()
-        }),
-    );
-
-    // GHSA API check (placeholder)
-    api_statuses.insert(
-        "ghsa_api".to_string(),
-        json!({
-            "status": "healthy",
-            "message": "API connectivity not implemented yet",
-            "last_check": Utc::now()
-        }),
-    );
-
-    api_statuses
-}
-
-/// Health check result structure
-#[derive(serde::Serialize)]
-struct HealthCheckResult {
-    status: String,
-    message: String,
-    last_check: chrono::DateTime<Utc>,
 }
 
 /// Prometheus-style metrics endpoint
@@ -212,36 +85,4 @@ pub async fn metrics(State(app_state): State<AppState>) -> Result<String, Status
     metrics.push_str("vulnera_uptime_seconds 0\n"); // Placeholder
 
     Ok(metrics)
-}
-
-/// Kubernetes liveness probe endpoint
-#[utoipa::path(
-    get,
-    path = "/health/live",
-    tag = "health",
-    responses(
-        (status = 200, description = "Service is alive")
-    )
-)]
-pub async fn liveness_probe() -> StatusCode {
-    // Simple liveness check - if we can respond, we're alive
-    StatusCode::OK
-}
-
-/// Kubernetes readiness probe endpoint
-#[utoipa::path(
-    get,
-    path = "/health/ready",
-    tag = "health",
-    responses(
-        (status = 200, description = "Service is ready to accept traffic"),
-        (status = 503, description = "Service is not ready")
-    )
-)]
-pub async fn readiness_probe(State(app_state): State<AppState>) -> StatusCode {
-    // Check if critical dependencies are available
-    match app_state.cache_service.get_cache_statistics().await {
-        Ok(_) => StatusCode::OK,
-        Err(_) => StatusCode::SERVICE_UNAVAILABLE,
-    }
 }
