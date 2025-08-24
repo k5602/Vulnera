@@ -394,31 +394,97 @@ impl GhsaClient {
                     other => other.to_string(),
                 };
 
-                // Build events: use an "introduced" sentinel when we have a vulnerable range,
-                // and add a "fixed" event when firstPatchedVersion is present.
-                let mut events: Vec<VersionEventData> = Vec::new();
-                if v.vulnerable_version_range.as_ref().is_some() {
-                    events.push(VersionEventData {
-                        event_type: "introduced".to_string(),
-                        value: "0".to_string(), // sentinel lower bound when not explicitly provided
-                    });
-                }
-                if let Some(fp) = v.first_patched_version.as_ref() {
-                    events.push(VersionEventData {
-                        event_type: "fixed".to_string(),
-                        value: fp.identifier.clone(),
-                    });
-                }
+                // Build precise events from GHSA vulnerable_version_range and firstPatchedVersion.
+                // Supports OR segments (||) and comma-separated constraints within each segment.
+                let mut ranges: Option<Vec<VersionRangeData>> = None;
+                if let Some(range_str) = v.vulnerable_version_range.as_ref() {
+                    let mut out: Vec<VersionRangeData> = Vec::new();
 
-                let ranges = if events.is_empty() {
-                    None
-                } else {
-                    Some(vec![VersionRangeData {
+                    for or_part in range_str.split("||") {
+                        let mut introduced: Option<String> = None;
+                        let mut fixed: Option<String> = None;
+                        let mut last_affected: Option<String> = None;
+
+                        for token in or_part.split(',') {
+                            let t = token.trim();
+                            if let Some(rest) = t.strip_prefix(">=") {
+                                introduced = Some(rest.trim().to_string());
+                            } else if let Some(rest) = t.strip_prefix('>') {
+                                // Approximate strict lower bound as introduced at this version
+                                introduced = Some(rest.trim().to_string());
+                            } else if let Some(rest) = t.strip_prefix("<=") {
+                                last_affected = Some(rest.trim().to_string());
+                            } else if let Some(rest) = t.strip_prefix('<') {
+                                fixed = Some(rest.trim().to_string());
+                            } else if let Some(rest) = t.strip_prefix('=') {
+                                // Exact version: introduced == last_affected == that version
+                                let vstr = rest.trim().to_string();
+                                introduced = Some(vstr.clone());
+                                last_affected = Some(vstr);
+                            }
+                        }
+
+                        // Prefer explicit first patched version if present
+                        if fixed.is_none() {
+                            if let Some(fp) = v.first_patched_version.as_ref() {
+                                fixed = Some(fp.identifier.clone());
+                            }
+                        }
+
+                        let mut events: Vec<VersionEventData> = Vec::new();
+                        let has_upper = fixed.is_some() || last_affected.is_some();
+                        if introduced.is_none() && has_upper {
+                            introduced = Some("0".to_string());
+                        }
+
+                        if let Some(intro) = introduced {
+                            events.push(VersionEventData {
+                                event_type: "introduced".to_string(),
+                                value: intro,
+                            });
+                        }
+                        if let Some(f) = fixed {
+                            events.push(VersionEventData {
+                                event_type: "fixed".to_string(),
+                                value: f,
+                            });
+                        } else if let Some(la) = last_affected {
+                            events.push(VersionEventData {
+                                event_type: "last_affected".to_string(),
+                                value: la,
+                            });
+                        }
+
+                        if !events.is_empty() {
+                            out.push(VersionRangeData {
+                                range_type: "SEMVER".to_string(),
+                                repo: None,
+                                events,
+                            });
+                        }
+                    }
+
+                    if !out.is_empty() {
+                        ranges = Some(out);
+                    }
+                } else if let Some(fp) = v.first_patched_version.as_ref() {
+                    // If only firstPatchedVersion exists, assume 0..fixed
+                    let events = vec![
+                        VersionEventData {
+                            event_type: "introduced".to_string(),
+                            value: "0".to_string(),
+                        },
+                        VersionEventData {
+                            event_type: "fixed".to_string(),
+                            value: fp.identifier.clone(),
+                        },
+                    ];
+                    ranges = Some(vec![VersionRangeData {
                         range_type: "SEMVER".to_string(),
                         repo: None,
                         events,
-                    }])
-                };
+                    }]);
+                }
 
                 AffectedPackageData {
                     package: PackageInfo {

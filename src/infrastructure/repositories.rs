@@ -98,6 +98,7 @@ impl AggregatingVulnerabilityRepository {
                     // Process events to determine version ranges
                     let mut introduced_version = None;
                     let mut fixed_version = None;
+                    let mut last_affected_version = None;
 
                     for event in &range.events {
                         match event.event_type.as_str() {
@@ -111,9 +112,9 @@ impl AggregatingVulnerabilityRepository {
                                 fixed_versions.push(event.value.clone());
                             }
                             "last_affected" => {
-                                // Use last_affected as the upper bound
+                                last_affected_version = Some(event.value.clone());
                             }
-                            _ => {} // Handle other event types as needed
+                            _ => {}
                         }
                     }
 
@@ -124,6 +125,7 @@ impl AggregatingVulnerabilityRepository {
                         if let (Ok(intro_ver), Ok(fix_ver)) =
                             (Version::parse(&introduced), Version::parse(&fixed))
                         {
+                            // [introduced, fixed)
                             affected_version_ranges.push(VersionRange::new(
                                 Some(intro_ver),
                                 Some(fix_ver),
@@ -131,7 +133,49 @@ impl AggregatingVulnerabilityRepository {
                                 false, // end exclusive (fixed version not affected)
                             ));
                         }
+                    } else if introduced_version.is_none() && fixed_version.is_some() {
+                        // No explicit introduced; treat as (< fixed)
+                        if let Some(fx) = &fixed_version {
+                            if let Ok(fix_ver) = Version::parse(fx) {
+                                affected_version_ranges.push(VersionRange::less_than(fix_ver));
+                            }
+                        }
+                    } else if introduced_version.is_some()
+                        && last_affected_version.is_some()
+                        && fixed_version.is_none()
+                    {
+                        // [introduced, last_affected]
+                        if let (Some(intro), Some(last)) =
+                            (&introduced_version, &last_affected_version)
+                        {
+                            if let (Ok(intro_ver), Ok(last_ver)) =
+                                (Version::parse(intro), Version::parse(last))
+                            {
+                                affected_version_ranges.push(VersionRange::new(
+                                    Some(intro_ver),
+                                    Some(last_ver),
+                                    true,
+                                    true, // end inclusive
+                                ));
+                            }
+                        }
+                    } else if introduced_version.is_none()
+                        && last_affected_version.is_some()
+                        && fixed_version.is_none()
+                    {
+                        // (..=last_affected]
+                        if let Some(last) = &last_affected_version {
+                            if let Ok(last_ver) = Version::parse(last) {
+                                affected_version_ranges.push(VersionRange::new(
+                                    None,
+                                    Some(last_ver),
+                                    false,
+                                    true,
+                                ));
+                            }
+                        }
                     } else if let Some(introduced) = introduced_version {
+                        // >= introduced
                         if let Ok(intro_ver) = Version::parse(&introduced) {
                             affected_version_ranges.push(VersionRange::at_least(intro_ver));
                         }
@@ -170,14 +214,11 @@ impl AggregatingVulnerabilityRepository {
             }
         }
 
-        // If no affected packages from data, fall back to queried package
+        // Filter affected packages to only those matching the queried package and version
+        affected_packages
+            .retain(|ap| ap.package.matches(_package) && ap.is_vulnerable(&_package.version));
         if affected_packages.is_empty() {
-            let affected_package = AffectedPackage::new(
-                _package.clone(),
-                vec![VersionRange::exact(_package.version.clone())],
-                vec![], // No fixed versions available from raw data
-            );
-            affected_packages.push(affected_package);
+            return Err("no affected package matches queried package/version".to_string());
         }
 
         // Use published_at or current time as fallback
@@ -493,7 +534,7 @@ impl AggregatingVulnerabilityRepository {
                         match self.convert_raw_vulnerability(raw_vuln, source.clone(), package) {
                             Ok(vulnerability) => all_vulnerabilities.push(vulnerability),
                             Err(e) => {
-                                error!("Failed to convert vulnerability from {:?}: {}", source, e);
+                                warn!("Failed to convert vulnerability from {:?}: {}", source, e);
                             }
                         }
                     }
@@ -632,7 +673,7 @@ impl AggregatingVulnerabilityRepository {
                     ) {
                         Ok(vulnerability) => vulnerabilities.push(vulnerability),
                         Err(e) => {
-                            error!("Failed to convert vulnerability from {:?}: {}", source, e);
+                            warn!("Failed to convert vulnerability from {:?}: {}", source, e);
                         }
                     }
                 }
