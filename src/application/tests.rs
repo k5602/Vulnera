@@ -443,7 +443,7 @@ async fn test_analysis_service_successful_analysis() {
     // Test with a simple package.json
     let package_json = r#"{"dependencies": {"express": "4.17.1"}}"#;
     let result = analysis_service
-        .analyze_dependencies(package_json, Ecosystem::Npm)
+        .analyze_dependencies(package_json, Ecosystem::Npm, Some("package.json"))
         .await;
 
     assert!(result.is_ok());
@@ -529,7 +529,7 @@ async fn test_analysis_service_repository_failure() {
 
     let package_json = r#"{"dependencies": {"express": "4.17.1"}}"#;
     let result = analysis_service
-        .analyze_dependencies(package_json, Ecosystem::Npm)
+        .analyze_dependencies(package_json, Ecosystem::Npm, Some("package.json"))
         .await;
 
     // Should still succeed but with no vulnerabilities due to graceful error handling
@@ -556,7 +556,7 @@ async fn test_analysis_service_invalid_file_format() {
 
     let invalid_json = r#"{"invalid": json"#;
     let result = analysis_service
-        .analyze_dependencies(invalid_json, Ecosystem::Npm)
+        .analyze_dependencies(invalid_json, Ecosystem::Npm, Some("package.json"))
         .await;
 
     assert!(result.is_err());
@@ -593,13 +593,13 @@ async fn test_analysis_service_caching_behavior() {
 
     // First analysis should populate cache
     let result1 = analysis_service
-        .analyze_dependencies(package_json, Ecosystem::Npm)
+        .analyze_dependencies(package_json, Ecosystem::Npm, Some("package.json"))
         .await
         .unwrap();
 
     // Second analysis should use cache (we can verify by checking cache statistics)
     let result2 = analysis_service
-        .analyze_dependencies(package_json, Ecosystem::Npm)
+        .analyze_dependencies(package_json, Ecosystem::Npm, Some("package.json"))
         .await
         .unwrap();
 
@@ -670,7 +670,7 @@ async fn test_analysis_service_with_custom_concurrency() {
 
     let package_json = r#"{"dependencies": {"express": "4.17.1"}}"#;
     let result = analysis_service
-        .analyze_dependencies(package_json, Ecosystem::Npm)
+        .analyze_dependencies(package_json, Ecosystem::Npm, Some("package.json"))
         .await;
 
     assert!(result.is_ok());
@@ -713,7 +713,7 @@ async fn test_concurrent_package_processing() {
     }"#;
 
     let result = analysis_service
-        .analyze_dependencies(package_json, Ecosystem::Npm)
+        .analyze_dependencies(package_json, Ecosystem::Npm, Some("package.json"))
         .await;
 
     assert!(result.is_ok());

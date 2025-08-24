@@ -232,6 +232,14 @@ pub struct VulnerabilityListResponse {
     /// Array of vulnerability details matching the query criteria
     pub vulnerabilities: Vec<VulnerabilityDto>,
 
+    /// Total count of items available across all pages
+    #[schema(example = 150)]
+    pub total_count: u64,
+
+    /// Cache status for the request
+    #[schema(example = "hit")]
+    pub cache_status: String,
+
     /// Pagination metadata for navigating through results
     pub pagination: PaginationDto,
 }

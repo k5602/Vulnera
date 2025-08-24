@@ -59,7 +59,7 @@ hex = "0.4.3"
 toml = "0.9.5"
 serde_yaml = "0.9.34-deprecated"
 serde_yml = "0.0.12"
-quick-xml = "0.38.2"
+quick-xml = "0.38"
 regex = "1.11.1"
 pest = "2.8.1"
 pest_derive = "2.8.1"
@@ -68,12 +68,51 @@ octocrab = { version = "0.44" }
 base64 = "0.22"
 percent-encoding = "2.3"
 
+# Optional dependencies for testing
+criterion = { version = "0.7.0", features = ["html_reports"], optional = true }
+proptest = { version = "1.5.0", optional = true }
+
 [dev-dependencies]
 tempfile = "3.21.0"
 axum-test = "18.0"
 mockito = "1.7.0"
+tokio-test = "0.4.4"
+futures = "0.3.31"
+serial_test = "3.1.0"
 
 [build-dependencies]
 vergen = { version = "8.0", features = ["build", "git", "gitcl"] }
-tokio-test = "0.4.4"
-mockito = "1.7.0"
+
+
+[features]
+default = []
+test-runner = []
+integration-tests = []
+benchmark = ["dep:criterion"]
+property-tests = ["dep:proptest"]
+
+# Test profiles
+[profile.test]
+opt-level = 1
+debug = true
+debug-assertions = true
+overflow-checks = true
+lto = false
+incremental = true
+codegen-units = 256
+
+[profile.bench]
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+lto = true
+incremental = false
+codegen-units = 1
+
+# Custom test configurations
+[package.metadata.test]
+timeout = "60s"
+threads = 4
+coverage = true
+junit = true
