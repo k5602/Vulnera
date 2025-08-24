@@ -258,9 +258,9 @@ impl AffectedPackage {
 
     /// Check if a specific version is vulnerable
     pub fn is_vulnerable(&self, version: &Version) -> bool {
-        // If no ranges specified, assume all versions are vulnerable
+        // If no ranges specified, do not assume vulnerability to avoid false positives
         if self.vulnerable_ranges.is_empty() {
-            return !self.fixed_versions.contains(version);
+            return false;
         }
 
         // Check if version falls within any vulnerable range

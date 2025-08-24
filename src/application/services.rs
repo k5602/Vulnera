@@ -321,7 +321,11 @@ use super::errors::ApplicationError;
 use crate::domain::{
     AnalysisMetadata, AnalysisReport, Ecosystem, Package, Vulnerability, VulnerabilityId,
 };
-use crate::infrastructure::{VulnerabilityRepository, cache::file_cache::FileCacheRepository};
+use crate::infrastructure::{
+    VulnerabilityRepository,
+    cache::file_cache::FileCacheRepository,
+    registries::{CratesIoRegistryClient, PackageRegistryClient},
+};
 
 /// Structured report data for API consumption
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -573,12 +577,10 @@ where
                 if let Some(parser) = self.parser_factory.create_parser(&file.path) {
                     match parser.parse_file(content).await {
                         Ok(pkgs) => {
-                            if input.return_packages {
-                                for p in &pkgs {
-                                    unique_packages
-                                        .entry(p.identifier())
-                                        .or_insert_with(|| p.clone());
-                                }
+                            for p in &pkgs {
+                                unique_packages
+                                    .entry(p.identifier())
+                                    .or_insert_with(|| p.clone());
                             }
                             parsed_files.push(RepositoryFileResultInternal {
                                 path: file.path.clone(),
@@ -614,8 +616,19 @@ where
         let mut all_vulns: Vec<Vulnerability> = Vec::new();
         for pkg in unique_packages.values() {
             match self.vuln_repo.find_vulnerabilities(pkg).await {
-                Ok(mut v) => all_vulns.append(&mut v),
-                Err(e) => debug!(package=%pkg.identifier(), error=%e, "vuln lookup failed"),
+                Ok(mut v) => {
+                    let before = v.len();
+                    v.retain(|vv| vv.affects_package(pkg));
+                    let after = v.len();
+                    debug!(
+                        "filtered repository vulnerabilities by version: package={} total={} affecting={}",
+                        pkg.identifier(),
+                        before,
+                        after
+                    );
+                    all_vulns.append(&mut v)
+                }
+                Err(e) => debug!("vuln lookup failed for package {}: {}", pkg.identifier(), e),
             }
         }
         // Deduplicate vulnerabilities by id
@@ -653,6 +666,7 @@ pub trait AnalysisService: Send + Sync {
         &self,
         file_content: &str,
         ecosystem: Ecosystem,
+        filename: Option<&str>,
     ) -> Result<AnalysisReport, ApplicationError>;
 
     async fn get_vulnerability_details(
@@ -831,8 +845,19 @@ impl<C: CacheService> PopularPackageServiceImpl<C> {
                         .await
                     {
                         Ok(vulns) => {
-                            debug!("Found {} vulnerabilities for {}", vulns.len(), name);
-                            all_vulnerabilities.extend(vulns);
+                            let total = vulns.len();
+                            let filtered: Vec<Vulnerability> = vulns
+                                .into_iter()
+                                .filter(|v| v.affects_package(&package))
+                                .collect();
+                            debug!(
+                                "Found {} vulnerabilities for {} ({} affect current version {})",
+                                total,
+                                name,
+                                filtered.len(),
+                                package.version
+                            );
+                            all_vulnerabilities.extend(filtered);
                         }
                         Err(e) => {
                             debug!("No vulnerabilities found for {}: {}", name, e);
@@ -1706,8 +1731,14 @@ impl<C: CacheService + 'static> AnalysisServiceImpl<C> {
                     if let Ok(Some(cached_vulns)) =
                         cache_service.get::<Vec<Vulnerability>>(&cache_key).await
                     {
-                        debug!("Cache hit for package: {}", package_id);
-                        return Ok((package_id, cached_vulns));
+                        let total = cached_vulns.len();
+                        // Filter to only vulnerabilities that actually affect this package version
+                        let filtered: Vec<Vulnerability> = cached_vulns
+                            .into_iter()
+                            .filter(|v| v.affects_package(&package_clone))
+                            .collect();
+                        debug!("Cache hit for package: {} (filtered {} -> {} affecting current version)", package_id, total, filtered.len());
+                        return Ok((package_id, filtered));
                     }
 
                     // Cache miss - query repository
@@ -1718,21 +1749,28 @@ impl<C: CacheService + 'static> AnalysisServiceImpl<C> {
 
                     match vuln_repo.find_vulnerabilities(&package_clone).await {
                         Ok(vulnerabilities) => {
-                            // Cache the result for future use
+                            let total = vulnerabilities.len();
+                            let filtered: Vec<Vulnerability> = vulnerabilities
+                                .into_iter()
+                                .filter(|v| v.affects_package(&package_clone))
+                                .collect();
+
+                            // Cache the filtered result for future use
                             let cache_ttl = std::time::Duration::from_secs(24 * 3600); // 24 hours
                             if let Err(e) = cache_service
-                                .set(&cache_key, &vulnerabilities, cache_ttl)
+                                .set(&cache_key, &filtered, cache_ttl)
                                 .await
                             {
                                 warn!("Failed to cache vulnerabilities for {}: {}", package_id, e);
                             }
 
                             debug!(
-                                "Found {} vulnerabilities for package: {}",
-                                vulnerabilities.len(),
-                                package_id
+                                "Found {} vulnerabilities for package: {} ({} affect current version)",
+                                total,
+                                package_id,
+                                filtered.len()
                             );
-                            Ok((package_id, vulnerabilities))
+                            Ok((package_id, filtered))
                         }
                         Err(e) => {
                             error!(
@@ -1782,6 +1820,7 @@ impl<C: CacheService + 'static> AnalysisService for AnalysisServiceImpl<C> {
         &self,
         file_content: &str,
         ecosystem: Ecosystem,
+        filename: Option<&str>,
     ) -> Result<AnalysisReport, ApplicationError> {
         let start_time = Instant::now();
         info!(
@@ -1789,10 +1828,61 @@ impl<C: CacheService + 'static> AnalysisService for AnalysisServiceImpl<C> {
             ecosystem
         );
 
+        // Precompute Cargo resolution flag before moving ecosystem
+        let do_cargo_resolution = matches!(ecosystem, Ecosystem::Cargo)
+            && filename.map(|f| f.ends_with("Cargo.toml")).unwrap_or(false);
+
         // Parse the dependency file
-        let packages = self
-            .parse_dependencies(file_content, ecosystem, None)
+        let mut packages = self
+            .parse_dependencies(file_content, ecosystem, filename)
             .await?;
+
+        // Resolve Cargo.toml minor/major specs to latest available version from crates.io (caret semantics)
+        if do_cargo_resolution {
+            let registry = CratesIoRegistryClient;
+            for pkg in packages.iter_mut() {
+                if !matches!(pkg.ecosystem, Ecosystem::Cargo) {
+                    continue;
+                }
+                let lower = pkg.version.clone();
+                // caret upper bound per Cargo semantics
+                let upper = if lower.0.major > 0 {
+                    crate::domain::Version::new(lower.0.major + 1, 0, 0)
+                } else if lower.0.minor > 0 {
+                    crate::domain::Version::new(0, lower.0.minor + 1, 0)
+                } else {
+                    crate::domain::Version::new(0, 0, lower.0.patch + 1)
+                };
+
+                match registry.list_versions(Ecosystem::Cargo, &pkg.name).await {
+                    Ok(mut vers) => {
+                        // Prefer stable, non-yanked versions within [lower, upper)
+                        vers.retain(|vi| {
+                            !vi.yanked
+                                && !vi.is_prerelease
+                                && vi.version >= lower
+                                && vi.version < upper
+                        });
+                        vers.sort_by(|a, b| a.version.cmp(&b.version));
+                        if let Some(best) = vers.last() {
+                            if best.version > pkg.version {
+                                debug!(
+                                    "Resolved Cargo.toml spec for {}: {} -> {}",
+                                    pkg.name, lower, best.version
+                                );
+                                pkg.version = best.version.clone();
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        debug!(
+                            "crates.io version resolution failed for {}: {} (using {})",
+                            pkg.name, e, pkg.version
+                        );
+                    }
+                }
+            }
+        }
 
         if packages.is_empty() {
             warn!("No packages found in dependency file");

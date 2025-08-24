@@ -425,7 +425,11 @@ pub async fn analyze_dependencies(
     // Perform analysis
     let analysis_report = app_state
         .analysis_service
-        .analyze_dependencies(&request.file_content, ecosystem)
+        .analyze_dependencies(
+            &request.file_content,
+            ecosystem,
+            request.filename.as_deref(),
+        )
         .await?;
 
     // Convert domain model to DTO

@@ -32,7 +32,7 @@ impl AnalyzeDependencies {
 
         let analysis_result = self
             .analysis_service
-            .analyze_dependencies(file_content, ecosystem)
+            .analyze_dependencies(file_content, ecosystem, None)
             .await?;
 
         info!(
